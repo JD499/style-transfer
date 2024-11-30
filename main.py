@@ -104,10 +104,9 @@ def calc_loss(gen_features, orig_features, style_features) :
     total_loss = alpha * content_loss + beta * style_loss
     return total_loss
 
-
-
 # Training the model
 def main():
+
     #Load the model to the GPU
     model=VGG().to(device).eval() 
 
@@ -119,27 +118,24 @@ def main():
 
     # Grab test image
 
-    #using adam optimizer and it will update the generated image not the model parameter 
+    # using adam optimizer and it will update the generated image not the model parameter 
     optimizer=optim.Adam([generated_image],lr=lr,weight_decay=0)
     
-    #iterating for 1000 times
+    # iterating for 1000 times
     for e in range (epoch):
         #extracting the features of generated, content and the original required for calculating the loss
         gen_features=model(generated_image)
         orig_feautes=model(original_image)
         style_featues=model(style_image)
         
-        #iterating over the activation of each layer and calculate the loss and add it to the content and the style loss
+        # iterating over the activation of each layer and calculate the loss and add it to the content and the style loss
         total_loss=calculate_loss(gen_features, orig_feautes, style_featues)
-        #optimize the pixel values of the generated image and backpropagate the loss
+        # optimize the pixel values of the generated image and backpropagate the loss
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
-        #print the image and save it after each 100 epoch
+        # print the image and save it after each 100 epoch
         if(e/100):
             print(total_loss)
             
             save_image(generated_image,"gen.png")    
-
-
-
