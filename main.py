@@ -1,10 +1,9 @@
 import torch
-import torchvision.transforms as transforms
-from PIL import Image
-import torch.nn as nn
-import torchvision.models as models
 import torch.optim as optim
-from torchvision.utils import save_image
+import torch.nn as nn
+from torchvision import transforms, models
+from PIL import Image
+import matplotlib.pyplot as plt
 
 # Pretrained model used to transform, scale, and normalize images that will be passed
 # into our style mode. This is a model designed for large scale image recognition. 
@@ -17,58 +16,53 @@ beta = 1.0
 # Assign the GPU to be used as a device (speed up training)
 device = torch.device("cuda" if (torch.cuda.is_available()) else "cpu")
 
-# Definine image loader
-def image_loader(path):
-    image = Image.open(path)
+# Load images
+def load_image(img_path, transform=None, max_size=400, shape=None):
+    image = Image.open(img_path).convert('RGB')
     
-    # Defining image transform steps befor model feeding
-    loader = transforms.Compose([transforms.Resize((512,512)), transforms.ToTensor()])
+    if max_size:
+        size = max(max(image.size), max_size)
+        image = transforms.Resize(size)(image)
     
-    # Resize and convet image to tensor
-    image = loader(image).unsqeeze(0)
+    if shape:
+        image = transforms.Resize(shape)(image)
     
-    return image.to(device, torch.float)
+    if transform:
+        image = transform(image).unsqueeze(0)
+    
+    return image
 
-# Define a class to provide more exacting feature extraction
+# Define image transformations
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+])
+
+# Load content and style images
+content = load_image('contentImage.jpeg', transform)
+style = load_image('styleImage.jpeg', transform, shape=content.shape[-2:])
+
+# Define the model
 class VGG(nn.Module):
     def __init__(self):
         super(VGG, self).__init__()
-        # Targeted features - why?
         self.req_features = ['0', '5', '10', '19', '28']
-        
-        # Extracting first 29 features. Essentially borrowing the first 29 layers of
-        # feature extraction from a trained deep image recognition model. 
-        
-        # Not currently sure why this is used. When we test we can see what 
-        # happens when/if we remove this model
         self.model = models.vgg19(pretrained=True).features[:29]
         
     def forward(self, x):
-        # Feature storage array
         features = []
-        
-        # Iterate over model layers
         for layer_num, layer in enumerate(self.model):
-            
-            # Store activation in x
             x = layer(x)
-            
-            # Append activations and return the feature array
-            if (str(layer_num) in self.req_features):
+            if str(layer_num) in self.req_features:
                 features.append(x)
-                
-            # At some point this forward movement requies the use of RELU 
-            # in the activation. The paper we reference uses 4 relU layers
-            # that are specified with numbers. If I can find their actual code
-            # which seems to be in LUA and convert the relu use then 
-            # we can try and implement them. Othewrise we can just blindly implement
-            # the four layers and use hyperparameter search to optimize 
-        
         return features
 
+# Initialize the model
+vgg = VGG().to('cuda' if torch.cuda.is_available() else 'cpu').eval()
 
 # Function to define loss calculation
 def calc_content_loss(gen_feature, orig_feature):
+
     # Content loss calced by adding MSE loss between content and generated feature then added
     # to the content loss
     content_l = torch.mean((gen_feature - orig_feature) ** 2)
@@ -77,6 +71,7 @@ def calc_content_loss(gen_feature, orig_feature):
 # Gram Matrix to calclate the style loss by doing the mean squared difference between the 
 # generated and style Gram Matrices
 def calc_style_loss(gen, style):
+    
     # G-matrix parameters
     _, channel, height, width = gen.shape
     
@@ -104,38 +99,46 @@ def calc_loss(gen_features, orig_features, style_features) :
     total_loss = alpha * content_loss + beta * style_loss
     return total_loss
 
-# Training the model
-def main():
-
-    #Load the model to the GPU
-    model=VGG().to(device).eval() 
-
-    #initialize the paramerters required for fitting the model
-    epoch=7000
-    lr=0.004
-    alpha=8
-    beta=70
-
-    # Grab test image
-
-    # using adam optimizer and it will update the generated image not the model parameter 
-    optimizer=optim.Adam([generated_image],lr=lr,weight_decay=0)
+# Define the style transfer function
+def style_transfer(vgg, content, style, iterations=300, lr=0.003):
+    target = content.clone().requires_grad_(True).to('cuda' if torch.cuda.is_available() else 'cpu')
+    optimizer = optim.Adam([target], lr=lr)
     
-    # iterating for 1000 times
-    for e in range (epoch):
-        #extracting the features of generated, content and the original required for calculating the loss
-        gen_features=model(generated_image)
-        orig_feautes=model(original_image)
-        style_featues=model(style_image)
+    for i in range(iterations):
+        target_features = vgg(target)
+        content_features = vgg(content)
+        style_features = vgg(style)
         
-        # iterating over the activation of each layer and calculate the loss and add it to the content and the style loss
-        total_loss=calculate_loss(gen_features, orig_feautes, style_featues)
-        # optimize the pixel values of the generated image and backpropagate the loss
+        content_loss = torch.mean((target_features[1] - content_features[1])**2)
+        
+        style_loss = 0
+        for t, s in zip(target_features, style_features):
+            _, c, h, w = t.size()
+            t = t.view(c, h * w)
+            s = s.view(c, h * w)
+            t = torch.mm(t, t.t())
+            s = torch.mm(s, s.t())
+            style_loss += torch.mean((t - s)**2) / (c * h * w)
+        
+        loss = content_loss + style_loss * 1e6
+        
         optimizer.zero_grad()
-        total_loss.backward()
+        loss.backward()
         optimizer.step()
-        # print the image and save it after each 100 epoch
-        if(e/100):
-            print(total_loss)
-            
-            save_image(generated_image,"gen.png")    
+        
+        if i % 50 == 0:
+            print(f'Iteration {i}, Loss: {loss.item()}')
+    
+    return target
+
+# Perform style transfer
+output = style_transfer(vgg, content, style)
+
+# Save the output image
+output_image = output.cpu().clone().squeeze(0)
+output_image = transforms.ToPILImage()(output_image)
+output_image.save('output_image.jpg')
+
+# Display the output image
+plt.imshow(output_image)
+plt.show()
