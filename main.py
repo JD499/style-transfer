@@ -178,7 +178,7 @@ device = set_device()
 print(f"Using device: {device}")
 
 # Load content and style images
-content = load_image('style-transfer/content.jpeg', transform)  # Load the content image
+content = load_image('style-transfer/content.jpg', transform)  # Load the content image
 
 ''' CONVERSION BACK TO NORMAL IMAGE
 # MODIFIED: Convert the tensor back to a PIL image
@@ -201,7 +201,7 @@ plt.title('OrigConv | After Load Image')
 plt.show()
 '''
 
-style   = load_image('style-transfer/style.jpeg',   transform, shape=content.shape[-2:])  # Load the style image with the same shape as the style image
+style   = load_image('style-transfer/style.jpg',   transform, shape=content.shape[-2:])  # Load the style image with the same shape as the style image
 
 # Initialize the model
 vgg = VGG().to(device).eval()  # Move the model to the appropriate device and set it to evaluation mode
