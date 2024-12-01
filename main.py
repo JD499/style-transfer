@@ -18,28 +18,23 @@ def set_device():
         return torch.device("cpu")  # Otherwise, use CPU
 
 
-# Load & preprocess an image
-def load_image(img_path, max_size=400, shape=None):
-    image = Image.open(img_path).convert(
-        "RGB"
-    )  # Open the image and convert to RGB (Three Channels)
+# Load and preprocess image
+def load_image(img_path, size=(512, 512)):
+    # Open Image
+    image = Image.open(img_path).convert("RGB")
 
-    if max_size:
-        size = max(max(image.size), max_size)  # Resize the image to the max size
-        image = transforms.Resize(size)(image)  # Apply the resize transformation
+    # Resize Image default value 512x512
+    image = transforms.Resize(size)(image)
 
-    if shape:
-        image = transforms.Resize(shape)(image)  # Resize the image to the given shape
-
+    # Convert to tensor and Normalize
     transform = transforms.Compose(
         [
-            transforms.ToTensor(),  # Convert the image to a tensor
-            transforms.Normalize(
-                (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
-            ),  # Normalize the image
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ]
     )
 
+    # Add dimension at index 0 for batch size
     image = transform(image).unsqueeze(0)
 
     """
@@ -133,7 +128,7 @@ def style_transfer(content_path, style_path, iterations=300, lr=0.01):
 
     # Load images
     content = load_image(content_path).to(device)
-    style = load_image(style_path, shape=content.shape[-2:]).to(device)
+    style = load_image(style_path).to(device)
 
     vgg = VGG().to(device).eval()
 
