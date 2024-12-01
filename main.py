@@ -1,4 +1,3 @@
-# Import required packages
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -19,19 +18,8 @@ def set_device():
         return torch.device("cpu")  # Otherwise, use CPU
 
 
-# Define image transformations (USED IN LOAD_IMAGE FUNCTION)
-transform = transforms.Compose(
-    [
-        transforms.ToTensor(),  # Convert the image to a tensor
-        transforms.Normalize(
-            (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
-        ),  # Normalize the image
-    ]
-)
-
-
 # Load & preprocess an image
-def load_image(img_path, transform=None, max_size=400, shape=None):
+def load_image(img_path, max_size=400, shape=None):
     image = Image.open(img_path).convert(
         "RGB"
     )  # Open the image and convert to RGB (Three Channels)
@@ -43,10 +31,16 @@ def load_image(img_path, transform=None, max_size=400, shape=None):
     if shape:
         image = transforms.Resize(shape)(image)  # Resize the image to the given shape
 
-    if transform:
-        image = transform(image).unsqueeze(
-            0
-        )  # Apply the transformation and add a batch dimension
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),  # Convert the image to a tensor
+            transforms.Normalize(
+                (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+            ),  # Normalize the image
+        ]
+    )
+
+    image = transform(image).unsqueeze(0)
 
     """
     # Un-Transform CODE
@@ -66,7 +60,18 @@ def load_image(img_path, transform=None, max_size=400, shape=None):
     plt.show()
     """
 
-    return image.to(device)  # Move the image to the appropriate device
+    return image
+
+
+def save_image(tensor, output_path):
+    # Convert back to PIL Image and save
+    image = tensor.cpu().clone().squeeze(0)
+    image = transforms.ToPILImage()(image)
+    image.save(output_path)
+
+    # Display the output image
+    plt.imshow(image)  # Display the output image
+    plt.show()  # Show the plot
 
 
 # Create a class VGG, which inherits the base class for all neural network modules
@@ -122,7 +127,16 @@ def calc_style_loss(gen_features, style_features):
 
 
 # Function to perform style transfer
-def style_transfer(vgg, content, style, iterations=300, lr=0.01):
+def style_transfer(content_path, style_path, iterations=300, lr=0.01):
+    device = set_device()
+    print(f"Using device: {device}")
+
+    # Load images
+    content = load_image(content_path).to(device)
+    style = load_image(style_path, shape=content.shape[-2:]).to(device)
+
+    vgg = VGG().to(device).eval()
+
     # Clone the content image and set requires_grad to True
     # target.required_grad_(True): gradients are computed during backward pass
     # target.to(device): moves the target tensor to our device
@@ -182,7 +196,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
             plt.axis("off")  # Hide the axis
 
             # Save the image
-            output_image.save(f"style-transfer/images/output_image{i}.jpg")
+            output_image.save(f"output_image{i}.jpg")
             """
             output_image = target.cpu().clone().squeeze(0)
             output_image = transforms.ToPILImage()(output_image)
@@ -199,12 +213,6 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
 alpha = 1.0  # Weight for content loss
 beta = 1.0  # Weight for style loss
 
-# Call the function to get the device
-device = set_device()
-print(f"Using device: {device}")
-
-# Load content and style images
-content = load_image("style-transfer/content.jpg", transform)  # Load the content image
 
 """ CONVERSION BACK TO NORMAL IMAGE
 # MODIFIED: Convert the tensor back to a PIL image
@@ -227,27 +235,21 @@ plt.title('OrigConv | After Load Image')
 plt.show()
 """
 
-style = load_image(
-    "style-transfer/style.jpg", transform, shape=content.shape[-2:]
-)  # Load the style image with the same shape as the style image
 
-# Initialize the model
-vgg = (
-    VGG().to(device).eval()
-)  # Move the model to the appropriate device and set it to evaluation mode
+if __name__ == "__main__":
+    content_path = "content.jpg"
+    style_path = "style.jpg"
+    output_path = "output.jpg"
 
-# Perform style transfer
-output = style_transfer(vgg, content, style)  # Perform style transfer
+    print("Starting style transfer")
 
-# Save the output image
-output_image = (
-    output.cpu().clone().squeeze(0)
-)  # Move the output image to the CPU and remove the batch dimension
-output_image = transforms.ToPILImage()(
-    output_image
-)  # Convert the tensor to a PIL (Python Image Library) image
-output_image.save("output_image.jpg")  # Save the output image
+    # Run style transfer
+    output = style_transfer(
+        content_path=content_path,
+        style_path=style_path,
+    )
 
-# Display the output image
-plt.imshow(output_image)  # Display the output image
-plt.show()  # Show the plot
+    # Save result
+    print("Saving output image")
+    save_image(output, output_path)
+    print(f"Output saved as {output_path}")
