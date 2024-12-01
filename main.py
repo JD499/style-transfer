@@ -6,6 +6,7 @@ import torch.optim as optim
 from PIL import Image
 from torchvision import models, transforms
 from torchvision.models import VGG19_Weights
+from torchvision.utils import save_image
 
 
 # Set device as Metal, CUDA, or CPU
@@ -57,17 +58,6 @@ def load_image(img_path, size=(512, 512)):
     """
 
     return image
-
-
-def save_image(tensor, output_path):
-    # Convert back to PIL Image and save
-    image = tensor.cpu().clone().squeeze(0)
-    image = transforms.ToPILImage()(image)
-    image.save(output_path)
-
-    # Display the output image
-    plt.imshow(image)  # Display the output image
-    plt.show()  # Show the plot
 
 
 # Create a class VGG, which inherits the base class for all neural network modules
