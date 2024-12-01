@@ -2,12 +2,19 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import transforms, models
 from torchvision.models import VGG19_Weights
 from PIL import Image
 import matplotlib.pyplot as plt
 
 import numpy as np
+
+# LOG: Struggles
+"""
+1. Upon getting the network working and figuring out the renormalization the network would
+run and nothing would happen to theinput image. It turned out that by setting both the weight
+"""
 
 # Assign user's device for optimal runtime (GPU or CPU)
 def set_device():
@@ -20,14 +27,17 @@ def set_device():
 
 # Define image transformations (USED IN LOAD_IMAGE FUNCTION)
 transform = transforms.Compose([
-    transforms.ToTensor(),  # Convert the image to a tensor
+    # Convert the image to a tensor : t
+    transforms.ToTensor(),  
+    # mean (from ImageNet dataset) = (0.485, 0.456, 0.406)
+    # sd   (from ImageNet dataset) = (0.229, 0.224, 0.225)
+    # t_n = (t - mean) / std
     transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))  # Normalize the image
 ])
 
 # Load & preprocess an image
 def load_image(img_path, transform=None, max_size=400, shape=None):
     image = Image.open(img_path).convert('RGB')  # Open the image and convert to RGB (Three Channels)
-    
     if max_size:
         size = max(max(image.size), max_size)    # Resize the image to the max size
         image = transforms.Resize(size)(image)   # Apply the resize transformation
@@ -66,7 +76,53 @@ class VGG(nn.Module):
 
         super(VGG, self).__init__()
         # Required feature layers (Indicates what specific layers we will extract from)
-        self.req_features = ['0', '5', '10', '19', '28']
+        """
+        Target layers from paper :  
+                  relu3 3 for the content 
+                  relu1 2, relu2 2, relu1 2, relu3 3, relu4 3
+        
+        Extracting layers 3,8,15,24 corresponding with relu1_2, relu2_2, relu3_3, relu4_3 in paper
+        Sequential(
+        (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (1): ReLU(inplace=True)
+        (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (3): ReLU(inplace=True)
+        (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (6): ReLU(inplace=True)
+        (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (8): ReLU(inplace=True)
+        (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (11): ReLU(inplace=True)
+        (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (13): ReLU(inplace=True)
+        (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (15): ReLU(inplace=True)
+        (16): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (17): ReLU(inplace=True)
+        (18): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        (19): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (20): ReLU(inplace=True)
+        (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (22): ReLU(inplace=True)
+        (23): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (24): ReLU(inplace=True)
+        (25): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (26): ReLU(inplace=True)
+        (27): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (29): ReLU(inplace=True)
+        (30): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (31): ReLU(inplace=True)
+        (32): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (33): ReLU(inplace=True)
+        (34): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (35): ReLU(inplace=True)
+        (36): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        )
+        """
+        self.req_features = ['3','8','15','24']
         # Load the VGG19 model and keep the first 29 layers
         self.model = models.vgg19(weights=VGG19_Weights.IMAGENET1K_V1).features[:29]
         
@@ -84,26 +140,68 @@ class VGG(nn.Module):
 
         return features  # Return the list of features
 
-# Function to define loss calculation
-def calc_content_loss(gen_feature, orig_feature):
-    # Content loss calculated by adding MSE loss between content and generated feature then added
-    content_l = torch.mean((gen_feature - orig_feature) ** 2)  # Calculate the mean squared error loss
-    return content_l  # Return the content loss
+def gram_matrix(input):
+    # a     - batch size
+    # b     - number of feature maps
+    # c,d   - dimensions of feature map
+    a,b,c,d = input.size()
 
-# Function to calculate style loss
-def calc_style_loss(gen_features, style_features):
-    style_l = 0
-    for gen, style in zip(gen_features, style_features):
-        _, c, h, w = gen.size()  # Get the dimensions of the generated features
-        gen = gen.view(c, h * w)  # Reshape the generated features
-        style = style.view(c, h * w)  # Reshape the style features
-        gen = torch.mm(gen, gen.t())  # Calculate the Gram matrix for the generated features
-        style = torch.mm(style, style.t())  # Calculate the Gram matrix for the style features
-        style_l += torch.mean((gen - style) ** 2) / (c * h * w)  # Calculate the mean squared error loss and normalize
-    return style_l  # Return the style loss
+    # Resive feature matrix
+    features = input.view(a * b, c * d)
+
+    # Compute the gram product
+    G = torch.mm(features, features.t())
+    
+    # Return normalized values by dividing by number of elemens in each feature map
+    return G.div(a * b, c * d)
+
+class StyleLoss(nn.Module):
+    def __init__(self, target):
+        super(StyleLoss, self).__init__()
+        self.targt = gram_matrix(target).detach()
+    
+    def forward(self, input):
+        G = gram_matrix(input)
+        self.loss = F.mse_loss(G, self.target)
+        return input
+
+class ContentLoss(nn.Module):
+    def __init__(self, target):
+        super(ContentLoss, self).__init__()
+        self.target = target.detach()
+        
+    def forward(self, input):
+        self.loss = F.mse_loss(input, self.target)
+        return input
+
+# Normalization layer
+# This normalization can be modified if want to use different types of normalization
+class Normalization(nn.Module):
+    def __init__(self, mean, std):
+        super(Normalization, self).__init__()
+        
+        # Image tensor will be BxCxHxW square matrix
+        # Resize mean and std to C x 1 x 1 Matrix to work with image tensor
+        self.mean = torch.tensor(mean).view(-1,1,1)
+        self.std = torch.tensor(std).view(-1,1,1)
+        
+    def forward(self, img):
+        return (img - self.mean) / self.std
+
+# Build model and components
+# From the paper - 
+# Content Loss : relu3_3 (15)
+# Style loss : relu1_2 (3), relu2_2 (8), relu3_3, relu4_3
+
+def build_model(cnn : nn.Module, norm_mean, norm_std, style_img, content_img):
+    # Create Normalization layer as first layer
+    model = nn.Sequential(Normalization(norm_mean, norm_std))
+
+    for layer in cnn.children():
+        # Append loss 
 
 # Function to perform style transfer
-def style_transfer(vgg, content, style, iterations=300, lr=0.01):
+def style_transfer(vgg, content, style, iterations=100, lr=0.01):
 
     # Clone the content image and set requires_grad to True
     # target.required_grad_(True): gradients are computed during backward pass
@@ -123,7 +221,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
         style_loss   = calc_style_loss(target_features,      style_features)      # Calculate the style loss
         
         # Calculate the total loss
-        loss = alpha * content_loss + beta * style_loss
+        loss = content_weight * content_loss + style_weight * style_loss
         
         optimizer.zero_grad() # Zero the gradients
         loss.backward()       # Backpropagate the loss
@@ -155,7 +253,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
             plt.axis('off')  # Hide the axis
             
             # Save the image
-            output_image.save(f'style-transfer/images/output_image{i}.jpg')
+            output_image.save(f'images/output_image{i}.jpg')
             '''
             output_image = target.cpu().clone().squeeze(0)
             output_image = transforms.ToPILImage()(output_image)
@@ -169,16 +267,18 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
     return target  # Return the target image
 
 
+
+
 # Loss calculation HYPERPARAMETER weights
-alpha = 1.0  # Weight for content loss
-beta = 1.0   # Weight for style loss
+content_weight = 1.0  # Weight for content loss
+style_weight = 100.0   # Weight for style loss
 
 # Call the function to get the device
 device = set_device()
 print(f"Using device: {device}")
 
 # Load content and style images
-content = load_image('style-transfer/content.jpeg', transform)  # Load the content image
+content = load_image('content.jpeg', transform)  # Load the content image
 
 ''' CONVERSION BACK TO NORMAL IMAGE
 # MODIFIED: Convert the tensor back to a PIL image
@@ -201,7 +301,7 @@ plt.title('OrigConv | After Load Image')
 plt.show()
 '''
 
-style   = load_image('style-transfer/style.jpeg',   transform, shape=content.shape[-2:])  # Load the style image with the same shape as the style image
+style   = load_image('style.jpeg',   transform, shape=content.shape[-2:])  # Load the style image with the same shape as the style image
 
 # Initialize the model
 vgg = VGG().to(device).eval()  # Move the model to the appropriate device and set it to evaluation mode
@@ -215,5 +315,30 @@ output_image = transforms.ToPILImage()(output_image)  # Convert the tensor to a 
 output_image.save('output_image.jpg')                 # Save the output image
 
 # Display the output image
-plt.imshow(output_image)  # Display the output image
-plt.show()  # Show the plot
+plt.imshow(output_image)
+plt.show()
+
+# Modularization: 
+# Content Loss Module
+# Style Loss Module
+# 
+"""
+Style Loss:
+    - How Loss : 
+                - Calculated by taking the gram matrix of the current syle features. Then taking the MSE loss between
+                  the gram matrix and the current img matrix
+    - Why Loss: <Dunno>
+
+Content Loss:
+    - How Loss:
+               - Calculated by taking gam matrix of the current generated features. Then taking the MSE los between
+               the gram matrix and the current img matrix
+               
+Normalization Module: 
+    - Why Normalize : <Dunno>
+    - How Normalize :  
+                    - In example above we take the MSE loss between the style and generated gram matrices
+                    - In example given by prof he takes (img - mean) / std where img matrix is a batch x channel x width x height
+                      sized matrix.
+    Good Math Explanation : https://stats.stackexchange.com/questions/361723/weight-normalization-technique-used-in-image-style-transfer
+"""
