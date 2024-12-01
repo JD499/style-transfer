@@ -8,14 +8,15 @@ from torchvision import models, transforms
 from torchvision.models import VGG19_Weights
 
 
-# Assign user's device for optimal runtime (GPU or CPU)
+# Set device as Metal, CUDA, or CPU
 def set_device():
     if torch.backends.mps.is_available():
-        return torch.device("mps")  # Use MPS (Metal Performance Shaders) if available
-    elif torch.cuda.is_available():
-        return torch.device("cuda")  # Use CUDA (GPU) if available
-    else:
-        return torch.device("cpu")  # Otherwise, use CPU
+        return torch.device("mps")
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+
+    return torch.device("cpu")
 
 
 # Load and preprocess image
