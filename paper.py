@@ -1,5 +1,6 @@
 # Import required packages
 from collections import namedtuple
+import time
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -162,12 +163,12 @@ class StyleTransferModel(nn.Module):
 # Gram Matrix Calc Utility
 def gram_matrix(x):
     # reshape x into a CxWH matrix
-    _, c, w, h = x.size()
-    R = x.view(c, w*h)
-
+    b, c, w, h = x.size()
+    r = x.view(b, c, w*h)
+    r_t = r.transpose(1,2)
     # Calc gram matrix using reshaped tensor
-    G = torch.div(torch.matmul(R, R.t()), c*w*h)
-    return G
+    gram = torch.bmm(r,r_t) / (c*w*h)
+    return gram
 
 # Perceptual Loss
 # We are grabbing some layers from the VGG16 pretrained model
@@ -245,14 +246,15 @@ class LossNetwork(nn.Module):
         for name, module in self.model._modules.items():
             x = module(x)
             # style = module(style.clone())
-            output[self.layer_mapping[name]] = x
+            if name in self.layer_mapping.keys():
+                output[self.layer_mapping[name]] = x
             # Calculate the gram matrix at the desired layers
             # if str(name) in self.feature_set:
             #     G = gram_matrix(gen)
             #     S = gram_matrix(style)
             #     style_loss += torch.square(torch.linalg.norm(G - S))
                 
-        return output
+        return LossOutput(**output)
         
 
 # Content Loss
@@ -313,6 +315,10 @@ def main():
     BATCH_SIZE = 1
     # STYLE
     STYLE_IMAGE = './style.jpg'
+    # WEIGHTS
+    FEATURE_WEIGHT = 1.0
+    STYLE_WEIGHT = 1.0
+    TVR_WEIGHT = 1.0
     
     # Device setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -334,7 +340,7 @@ def main():
     
     # Setup PerceptuaLoss network
     with torch.no_grad():
-        loss_network = PerceptualLoss(1.0, 1.0, 1.0)
+        loss_network = LossNetwork()
         loss_network.to(device)
     loss_network.eval()
         
@@ -363,9 +369,23 @@ def main():
     # Train the model
     model.train()
     count = 0
-    total_loss = 0
+    steps = 200
+    mse = nn.MSELoss()
+
+    # DEBUG
     torch.autograd.set_detect_anomaly(True)
+    torch.cuda.set_per_process_memory_fraction(0.85)
     
+    # Calc style gram matrix
+    with torch.no_grad():
+        style_feature_loss = loss_network(style_img_tensor)
+        style_gram = [gram_matrix(y) for y in style_feature_loss]
+    
+    # Initialize Loss Tracking
+    total_feature_loss = 0
+    total_style_loss = 0
+    total_tvr_loss = 0
+
     while True:
         for x, _ in train_loader:
             count += 1
@@ -375,13 +395,47 @@ def main():
             x = x.to(device)
             y = model(x)
             
-            # Pass through the loss function and pass in style
-            # content and generated
-            total_loss += loss_network((style_img_tensor.clone(), x.clone(), y.clone()))
+            # Isolate content
+            with torch.no_grad():
+                x_feature = x.detach()
+                
+            # Calc feature losses
+            y_loss = loss_network(y)
+            x_loss = loss_network(x_feature)
+            
+            with torch.no_grad():
+                x_feature_loss = x_loss[1].detach()
+            
+            feature_loss = FEATURE_WEIGHT * mse(y_loss[1], x_feature_loss)
+            
+            # Calc style losses
+            style_loss = 0
+            # Iterate over the four layers where we want to calculate Gram Matrix MSE
+            for i in range(0,3):
+                y_gram = gram_matrix(y_loss[i])
+                style_loss += mse(y_gram, style_gram[i].expand_as(y_gram))
+            style_loss = STYLE_WEIGHT * style_loss
+            
+            # Calc TVR loss
+            tvr_loss = TVR_WEIGHT * tvr(y)
+            
+            # Backpropogate
+            total_loss = feature_loss + style_loss + tvr_loss
             total_loss.backward()
             optimizer.step()
-
-            if count == 10:
+            
+            # Update total counts
+            total_feature_loss += feature_loss
+            total_style_loss += style_loss
+            total_tvr_loss += tvr_loss
+            
+            # Debug msg
+            if count % 5 == 0:
+                msg = f'{time.ctime()} [{count} / {steps}] feature:{total_feature_loss} style:{total_style_loss} tvr:{total_tvr_loss} total:{total_feature_loss + total_style_loss + total_tvr_loss}'
+                save_debug_image(x, y.detach(), "../debug/{}.png".format(base_steps + count))
+                print(msg)
+            
+            if count >= steps:
                 return
     
     return
