@@ -100,7 +100,7 @@ class VGG(nn.Module):
 
 
 # Content Loss
-def calc_content_loss(gen_feature, orig_feature):
+def calc_content_loss(orig_feature, gen_feature):
     return 0.5 * torch.sum((gen_feature - orig_feature) ** 2)
 
 
@@ -111,14 +111,13 @@ def gram_matrix(features):
 
 
 # Style Loss
-def calc_style_loss(gen_features, style_features):
+def calc_style_loss(style_features, gen_features):
     loss = 0
-    for gen, style in zip(gen_features, style_features):
-        gen_gram = gram_matrix(gen)
+    for style, gen in zip(style_features, gen_features):
         style_gram = gram_matrix(style)
+        gen_gram = gram_matrix(gen)
 
         batch_size, channels, height, width = gen.size()
-
         N = channels
         M = height * width
 
@@ -127,7 +126,14 @@ def calc_style_loss(gen_features, style_features):
 
 
 # Function to perform style transfer
-def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
+def style_transfer(
+    content_path,
+    style_path,
+    iterations=300,
+    lr=1e-7,
+    content_weight=1e-200,
+    style_weight=1,
+):
     device = set_device()
     print(f"Using device: {device}")
 
@@ -154,25 +160,20 @@ def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
         )  # Get the features of the content image
         style_features, _ = vgg(style)  # Get the features of the style image
 
-        content_loss = calc_content_loss(
-            generated_content, content_content
-        )  # Calculate the content loss
-        style_loss = calc_style_loss(
-            generated_style, style_features
-        )  # Calculate the style loss
+        content_loss = calc_content_loss(content_content, generated_content)
+        style_loss = calc_style_loss(style_features, generated_style)
 
-        # Calculate the total loss
-        loss = alpha * content_loss + beta * style_loss
+        total_loss = content_weight * content_loss + style_weight * style_loss
 
         optimizer.zero_grad()  # Zero the gradients
-        loss.backward()  # Backpropagate the loss
+        total_loss.backward()  # Backpropagate the loss
         optimizer.step()  # Update the target image
 
         # if i % 50 == 0: # Print the loss every 50 iterations
         #    print(f'Iteration {i}, Loss: {loss.item()}')
 
         if i % 10 == 0:
-            print(f"Iteration {i}, Loss: {loss.item()}")
+            print(f"Iteration {i}, Loss: {total_loss.item()}")
 
             # Print the image every 10 iterations
             output_image = (
@@ -211,11 +212,6 @@ def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
             """
 
     return generated  # Return the target image
-
-
-# Loss calculation HYPERPARAMETER weights
-alpha = 1e-3  # Weight for content loss
-beta = 1.0  # Weight for style loss
 
 
 """ CONVERSION BACK TO NORMAL IMAGE
