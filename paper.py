@@ -57,10 +57,7 @@ class DownsampleBlock(nn.Module):
         )
         
     def forward(self, x):
-        print(x.size())
-        print('moved through downsample')
         output = self.downblock(x)
-        print(output.size())
         return output
 
 # Upsampling Block
@@ -73,8 +70,6 @@ class UpsampleBlock(nn.Module):
     def __init__(self):
         super(UpsampleBlock, self).__init__()
         self.upblock = nn.Sequential(
-            # nn.Upsample(mode='nearest', scale_factor=2),            
-            # nn.ReflectionPad2d(2),
             nn.ConvTranspose2d(in_channels=64,
                       out_channels=32,
                       kernel_size=(3,3),
@@ -94,9 +89,7 @@ class UpsampleBlock(nn.Module):
         )
     
     def forward(self, x):
-        print('moved through upsample')
         output = self.upblock(x)
-        print(output.size())
         return output
 
 # Residual block
@@ -120,15 +113,13 @@ class ResidualBlock(nn.Module):
             nn.Conv2d(channels, channels, kernel_size=(3,3), stride=1),
             nn.InstanceNorm2d(channels, affine=True),
         )
+        self.last_relu = nn.ReLU()
         
     def forward(self, x):
         residual = x
-        print(residual.size())
-        print('moved through residual')
         first_out = self.resblock(x)
-        print(first_out.size())
         skip = first_out + residual
-        return torch.relu(skip)
+        return self.last_relu(skip)
        
 class StyleTransferModel(nn.Module):
     def __init__(self):
@@ -151,8 +142,7 @@ class StyleTransferModel(nn.Module):
 def gram_matrix(x):
     # reshape x into a CxWH matrix
     _, c, w, h = x.size()
-    R = x.view((c, w*h))
-    print(R.size()) 
+    R = x.view(c, w*h)
 
     # Calc gram matrix using reshaped tensor
     G = torch.div(torch.matmul(R, R.t()), c*w*h)
@@ -177,7 +167,15 @@ class PerceptualLoss(nn.Module):
     def forward(self, x):
         # style, content, generated packed into x
         style,content,gen = x
-        perceptual_loss = self.alpha * self.style_loss((style,gen)) + self.beta * self.feature_loss((content, gen)) + self.gamma * self.tvr(gen)
+        style_loss = self.style_loss((style.clone(), gen.clone()))
+        print(f'Style Loss: {style_loss}')
+        feature_loss = self.feature_loss((content.clone(), gen.clone()))
+        print(f'Feature Loss: {feature_loss}')
+        tvr_loss = self.tvr(gen.clone())
+        print(f'TVR Loss: {tvr_loss}')
+        
+        perceptual_loss = self.alpha * style_loss + self.beta * feature_loss + self.gamma * tvr_loss
+        print(f'Preceptual Loss: {perceptual_loss}')
         return perceptual_loss
         
 # Total Variance Regularizer
@@ -186,9 +184,9 @@ class TVR(nn.Module):
         super(TVR, self).__init__()
     
     def forward(self, x):
-        c,h,w = x.shape()
-        tv_h = torch.pow(x[:,1:,:]-x[:,:-1,:], 2).sum()
-        tv_w = torch.pow(x[:,:,1:]-x[:,:,:-1], 2).sum()
+        _,c,h,w = x.size()
+        tv_h = torch.pow(x[:,:,1:,:]-x[:,:,:-1,:], 2).sum()
+        tv_w = torch.pow(x[:,:,:,1:]-x[:,:,:,:-1], 2).sum()
         return (tv_h+tv_w)/(c*h*w)
 
 # Style Loss
@@ -207,17 +205,15 @@ class StyleLoss(nn.Module):
         # Style, gen packed into x
         style, gen = x
         style_loss = 0 
-        print('calc style loss')
         # Extract desired features
-        for name, module in enumerate(self.model):
-            gen = module(gen)
-            
-            # The style image also needs to pass through the vgg activation layers
-            S = gram_matrix(module(style))
+        for name, module in self.model._modules.items():
+            gen = module(gen.clone())
+            style = module(style.clone())
             
             # Calculate the gram matrix at the desired layers
             if str(name) in self.feature_set:
                 G = gram_matrix(gen)
+                S = gram_matrix(style)
                 style_loss += torch.square(torch.linalg.norm(G - S))
                 
         return style_loss
@@ -239,18 +235,20 @@ class FeatureLoss(nn.Module):
         content, gen = x 
         content_loss = 0
         
-        print('calc feature loss')
         for name, module in enumerate(self.model):
             if str(name) in self.feature_set:
                 gen = module(gen)
+                content = module(content)
+                
+                print(gen.size())
+                print(content.size())
                 # Extract shape to scale
-                c,w,h = gen.shape()
+                _,c,w,h = gen.size()
                 scale_factor = c * w * h                
                 
-                content_activation = module(content)
                 # Calculate the MSE square error of the scaled vector norm
                 content_loss += torch.div(
-                    torch.square(torch.linalg.vector_norm(gen - content_activation)),
+                    torch.square(torch.linalg.vector_norm(gen - content)),
                     scale_factor
                 )
                 
@@ -285,7 +283,7 @@ def main():
     
     # Setup image transformation for dataloader
     transform = transforms.Compose([
-        transforms.Resize(IMAGE_SIZE),
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.CenterCrop(IMAGE_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -308,7 +306,7 @@ def main():
     style_img = Image.open(STYLE_IMAGE).convert('RGB')
     with torch.no_grad():
         style_img_tensor = transforms.Compose([
-            transforms.Resize(IMAGE_SIZE*2),
+            transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
             transforms.ToTensor(),
             transforms.Normalize(
             # mean and std taken from ImageNet norm & std
@@ -316,8 +314,7 @@ def main():
             std=[0.229, 0.224, 0.225])
         ])(style_img).unsqueeze(0)
         style_img_tensor = style_img_tensor.to(device)
-        print(style_img_tensor.size())
-        exit()
+    print(style_img_tensor.size())
     # Check that image was properly converted to tensor
     # plt.imshow(recover_image(style_img_tensor.cpu().numpy())[0])
 
@@ -331,6 +328,7 @@ def main():
     model.train()
     count = 0
     total_loss = 0
+    torch.autograd.set_detect_anomaly(True)
     
     while True:
         for x, _ in train_loader:
@@ -343,10 +341,11 @@ def main():
             
             # Pass through the loss function and pass in style
             # content and generated
-            total_loss += loss_network((style_img_tensor, x, y))
-            print(total_loss)
+            total_loss += loss_network((style_img_tensor.clone(), x.clone(), y.clone()))
+            total_loss.backward()
+            optimizer.step()
 
-            if count == 1:
+            if count == 10:
                 return
     
     return
