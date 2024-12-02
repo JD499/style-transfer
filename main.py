@@ -72,23 +72,31 @@ class VGG(nn.Module):
         # Replace MaxPool with AvgPool
         for i, layer in enumerate(self.model):
             if isinstance(layer, nn.MaxPool2d):
-                self.model[i] = nn.AvgPool2d(kernel_size=2)
+                self.model[i] = nn.AvgPool2d(kernel_size=2, stride=2)
 
-        # Required feature layers (Indicates what specific layers we will extract from)
-        self.req_features = [0, 5, 10, 19, 28]
+        # VGG19 layers for style features (conv1_1, conv2_1, conv3_1, conv4_1, conv5_1)
+        self.style_layers = [0, 5, 10, 19, 28]
+
+        # VGG19 layer for content features (conv4_2)
+        self.content_layer = 21
 
     # Define the foward pass method
     def forward(self, x):
         features = []  # List to store the features
+        content = None
+
         # For each layer in the model
         for layer_num, layer in enumerate(self.model):
             x = layer(x)  # Pass the input through each layer
 
             # IF THE LAYER WE ARE ON IS AN FEATURE-EXTRACTION LAYER
-            if layer_num in self.req_features:
+            if layer_num in self.style_layers:
                 features.append(x)  # Append the features from the required layers
 
-        return features  # Return the list of features
+            if layer_num == self.content_layer:
+                content = x
+
+        return features, content  # Return the list of features
 
 
 # Content Loss
@@ -132,21 +140,25 @@ def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
     # Clone the content image and set requires_grad to True
     # target.required_grad_(True): gradients are computed during backward pass
     # target.to(device): moves the target tensor to our device
-    target = content.clone().requires_grad_(True).to(device)
+    generated = content.clone().requires_grad_(True).to(device)
 
     # Initialize the optimizer
-    optimizer = optim.SGD([target], lr=lr)
+    optimizer = optim.SGD([generated], lr=lr)
 
     for i in range(iterations):
-        target_features = vgg(target)  # Get the features of the target image
-        content_features = vgg(content)  # Get the features of the content image
-        style_features = vgg(style)  # Get the features of the style image
+        generated_style, generated_content = vgg(
+            generated
+        )  # Get the features of the target image
+        content_features, content_content = vgg(
+            content
+        )  # Get the features of the content image
+        style_features, _ = vgg(style)  # Get the features of the style image
 
         content_loss = calc_content_loss(
-            target_features[1], content_features[1]
+            generated_content, content_content
         )  # Calculate the content loss
         style_loss = calc_style_loss(
-            target_features, style_features
+            generated_style, style_features
         )  # Calculate the style loss
 
         # Calculate the total loss
@@ -164,7 +176,7 @@ def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
 
             # Print the image every 10 iterations
             output_image = (
-                target.cpu().clone().squeeze(0).detach().numpy()
+                generated.cpu().clone().squeeze(0).detach().numpy()
             )  # Remove batch dimension (squeeze), convert to a NumPy array for visualization
             output_image = output_image.transpose(
                 1, 2, 0
@@ -198,7 +210,7 @@ def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
             plt.show() 
             """
 
-    return target  # Return the target image
+    return generated  # Return the target image
 
 
 # Loss calculation HYPERPARAMETER weights
