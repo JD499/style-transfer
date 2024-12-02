@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from PIL import Image
 from torchvision import models, transforms
@@ -84,13 +85,9 @@ class VGG(nn.Module):
         return features  # Return the list of features
 
 
-# Function to define loss calculation
+# Content Loss
 def calc_content_loss(gen_feature, orig_feature):
-    # Content loss calculated by adding MSE loss between content and generated feature then added
-    content_l = torch.mean(
-        (gen_feature - orig_feature) ** 2
-    )  # Calculate the mean squared error loss
-    return content_l  # Return the content loss
+    return 0.5 * F.mse_loss(gen_feature, orig_feature)
 
 
 # Function to calculate style loss
