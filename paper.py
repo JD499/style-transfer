@@ -1,4 +1,5 @@
 # Import required packages
+from collections import namedtuple
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -16,6 +17,26 @@ import numpy as np
 #   - res block orig [44]
 # Src 3 = https://towardsdatascience.com/pytorch-implementation-of-perceptual-losses-for-real-time-style-transfer-8d608e2e9902
 #   - guidance on how to implement the model
+
+# Struggle #1
+# Paper 2 does not provide any code for the architechture that it proposes. Repeated mention of supplmentary materials 
+# are made but supplmenetary materials were not available with the arxiv preprint paper. The use of fraction convolutions 
+# is mentioned with a stride of 1/2. The only fractional convolutions available are convTranspose2d where the fraction 
+# 1/2 presented by the paper must be flipped. I also had to add padding within the residual blocks which is not 
+# specifically stated in the original presentation of the residual block archtechture. This is because the conv2d blocks
+# will naturally reduce the size of the matrix. Though the conv takes padding as an argument I used reflection padding instead
+# of standard zero padding because the points on the edge should be entirely influenced by the styles and features of 
+# the surrounding area. 
+
+# Struggl #2
+# First model implementation used three modules where the style and feature loss were seperate and acted as seperate modules
+# joined in another module that computed the perceptual loss. The way that this was implemented required the retain_graph option
+# to be set to True as well as repeated tensor cloning to avoid inplace operations. When doing this the entire computation graph 
+# along with the cloned tensors (larges ones around 64,60000 for the gram matrices) started to eat GPU memory and within 20 iterations 
+# broke 20gb of allocated memory which forced the training to stop on a 4060 limited to 16gb of available memory. 
+
+# To solve this I will be taking some inspiration from src 3 which computes only the relu activation values and returns those
+# and then computes the actual perceptual loss within the training loop.
 
 # Scaling tanh to output in [0,255] range
 # f(x) = |255tanh(x)|
@@ -154,69 +175,84 @@ def gram_matrix(x):
 # Here we take our StyleLoss & Content Loss outputs, sum them and add the total variance
 # regularizer. Here target is the image to be styled and the style image is the style reference
 # alpha, beta, gamma refer to the loss weights
-class PerceptualLoss(nn.Module):
-    def __init__(self, alpha, beta, gamma):
-        super(PerceptualLoss, self).__init__()
-        self.style_loss = StyleLoss()
-        self.feature_loss = FeatureLoss()
-        self.tvr = TVR()
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
+# class PerceptualLoss(nn.Module):
+#     def __init__(self, alpha, beta, gamma):
+#         super(PerceptualLoss, self).__init__()
+#         self.style_loss = StyleLoss()
+#         self.feature_loss = FeatureLoss()
+#         self.tvr = TVR()
+#         self.alpha = alpha
+#         self.beta = beta
+#         self.gamma = gamma
 
-    def forward(self, x):
-        # style, content, generated packed into x
-        style,content,gen = x
-        style_loss = self.style_loss((style.clone(), gen.clone()))
-        print(f'Style Loss: {style_loss}')
-        feature_loss = self.feature_loss((content.clone(), gen.clone()))
-        print(f'Feature Loss: {feature_loss}')
-        tvr_loss = self.tvr(gen.clone())
-        print(f'TVR Loss: {tvr_loss}')
+#     def forward(self, x):
+#         # style, content, generated packed into x
+#         style,content,gen = x
+#         style_loss = self.style_loss((style.clone(), gen.clone()))
+#         print(f'Style Loss: {style_loss}')
+#         feature_loss = self.feature_loss((content.clone(), gen.clone()))
+#         print(f'Feature Loss: {feature_loss}')
+#         tvr_loss = self.tvr(gen.clone())
+#         print(f'TVR Loss: {tvr_loss}')
         
-        perceptual_loss = self.alpha * style_loss + self.beta * feature_loss + self.gamma * tvr_loss
-        print(f'Preceptual Loss: {perceptual_loss}')
-        return perceptual_loss
+#         perceptual_loss = self.alpha * style_loss + self.beta * feature_loss + self.gamma * tvr_loss
+#         print(f'Preceptual Loss: {perceptual_loss}')
+#         return perceptual_loss
         
 # Total Variance Regularizer
-class TVR(nn.Module):
-    def __init__(self):
-        super(TVR, self).__init__()
+# class TVR(nn.Module):
+#     def __init__(self):
+#         super(TVR, self).__init__()
     
-    def forward(self, x):
-        _,c,h,w = x.size()
-        tv_h = torch.pow(x[:,:,1:,:]-x[:,:,:-1,:], 2).sum()
-        tv_w = torch.pow(x[:,:,:,1:]-x[:,:,:,:-1], 2).sum()
-        return (tv_h+tv_w)/(c*h*w)
+def tvr(x):
+    _,c,h,w = x.size()
+    tv_h = torch.pow(x[:,:,1:,:]-x[:,:,:-1,:], 2).sum()
+    tv_w = torch.pow(x[:,:,:,1:]-x[:,:,:,:-1], 2).sum()
+    return (tv_h+tv_w)/(c*h*w)
 
 # Style Loss
 # MSE of gram matrix differences between the generated and style images
 # Assume that a CxHxW matrix is being supplied to Style Loss
 # Requires style matrix to be provided in order to generate the loss value which is the 
 # mean square difference of the gram matrix of the generated and the style content
-class StyleLoss(nn.Module):
+# class StyleLoss(nn.Module):
+
+# Next Implementation
+# Reduce number of modules and inplace operations by returning only the activation outputs
+# and handling loss calculations within the training loop
+LossOutput = namedtuple(
+    "LossOutput", ['relu1', 'relu2', 'relu3', 'relu4']
+)
+class LossNetwork(nn.Module):
     def __init__(self):
-        super(StyleLoss, self).__init__()
+        # super(StyleLoss, self).__init__()
+        super(LossNetwork, self).__init__()
         # Only intersted in a certain set of features 3,8,15,24
-        self.feature_set = ['3', '8', '15', '24']
+        # self.feature_set = ['3', '8', '15', '24']
+        self.layer_mapping = {
+            '3' : 'relu1',
+            '8' : 'relu2',
+            '15': 'relu3',
+            '24': 'relu4'
+        }
         self.model = models.vgg.vgg19(pretrained=True).features[:29]
         
     def forward(self, x):
         # Style, gen packed into x
-        style, gen = x
-        style_loss = 0 
+        output = {}
+        # style_loss = 0 
         # Extract desired features
         for name, module in self.model._modules.items():
-            gen = module(gen.clone())
-            style = module(style.clone())
-            
+            x = module(x)
+            # style = module(style.clone())
+            output[self.layer_mapping[name]] = x
             # Calculate the gram matrix at the desired layers
-            if str(name) in self.feature_set:
-                G = gram_matrix(gen)
-                S = gram_matrix(style)
-                style_loss += torch.square(torch.linalg.norm(G - S))
+            # if str(name) in self.feature_set:
+            #     G = gram_matrix(gen)
+            #     S = gram_matrix(style)
+            #     style_loss += torch.square(torch.linalg.norm(G - S))
                 
-        return style_loss
+        return output
         
 
 # Content Loss
@@ -224,35 +260,35 @@ class StyleLoss(nn.Module):
 # aspect like texture and shape that are otherwise lost
 # Here we take the euclidean norm of the activation output vectors between
 # the generated image and the target content image
-class FeatureLoss(nn.Module):
-    def __init__(self):
-        super(FeatureLoss, self).__init__()
-        self.model = models.vgg.vgg19(pretrained=True).features[:29]
-        self.feature_set = ['8']
+# class FeatureLoss(nn.Module):
+#     def __init__(self):
+#         super(FeatureLoss, self).__init__()
+#         self.model = models.vgg.vgg19(pretrained=True).features[:29]
+#         self.feature_set = ['8']
 
-    def forward(self, x):
-        # content, genereated is passed into the FeatureLoss
-        content, gen = x 
-        content_loss = 0
+#     def forward(self, x):
+#         # content, genereated is passed into the FeatureLoss
+#         content, gen = x 
+#         content_loss = 0
         
-        for name, module in enumerate(self.model):
-            if str(name) in self.feature_set:
-                gen = module(gen)
-                content = module(content)
+#         for name, module in enumerate(self.model):
+#             if str(name) in self.feature_set:
+#                 gen = module(gen)
+#                 content = module(content)
                 
-                print(gen.size())
-                print(content.size())
-                # Extract shape to scale
-                _,c,w,h = gen.size()
-                scale_factor = c * w * h                
+#                 print(gen.size())
+#                 print(content.size())
+#                 # Extract shape to scale
+#                 _,c,w,h = gen.size()
+#                 scale_factor = c * w * h                
                 
-                # Calculate the MSE square error of the scaled vector norm
-                content_loss += torch.div(
-                    torch.square(torch.linalg.vector_norm(gen - content)),
-                    scale_factor
-                )
+#                 # Calculate the MSE square error of the scaled vector norm
+#                 content_loss += torch.div(
+#                     torch.square(torch.linalg.vector_norm(gen - content)),
+#                     scale_factor
+#                 )
                 
-        return content_loss
+#         return content_loss
 
 # Helper from src3 to convert img back from tensor
 def recover_image(img):
