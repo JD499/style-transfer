@@ -144,8 +144,8 @@ def style_transfer(
     content_path,
     style_path,
     iterations=300,
-    lr=1e-7,
-    content_weight=1e-200,
+    lr=8000,
+    content_weight=1e-60,
     style_weight=1,
 ):
     # Setup device
@@ -165,7 +165,7 @@ def style_transfer(
     generated = content.clone().requires_grad_(True).to(device)
 
     # Initialize optimizer
-    optimizer = optim.SGD([generated], lr=lr)
+    optimizer = optim.SGD([generated], lr=lr, momentum=0.9)
 
     # Optimization loop
     for i in range(iterations):
