@@ -135,6 +135,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
         if i % 10 == 0:
             print(f'Iteration {i}, Loss: {loss.item()}')
             
+            
             # Print the image every 10 iterations
             output_image = target.cpu().clone().squeeze(0).detach().numpy()  # Remove batch dimension (squeeze), convert to a NumPy array for visualization
             output_image = output_image.transpose(1, 2, 0)  # If the tensor shape is (C, H, W), we need to transpose it to (H, W, C)
@@ -156,6 +157,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
             
             # Save the image
             output_image.save(f'style-transfer/images/output_image{i}.jpg')
+            
             '''
             output_image = target.cpu().clone().squeeze(0)
             output_image = transforms.ToPILImage()(output_image)
@@ -171,7 +173,7 @@ def style_transfer(vgg, content, style, iterations=300, lr=0.01):
 
 # Loss calculation HYPERPARAMETER weights
 alpha = 1.0  # Weight for content loss
-beta = 1.0   # Weight for style loss
+beta = 250.0   # Weight for style loss
 
 # Call the function to get the device
 device = set_device()
