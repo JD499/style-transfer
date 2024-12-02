@@ -302,6 +302,15 @@ def recover_image(img):
         ).transpose(0, 2, 3, 1) *
         255.
     ).clip(0, 255).astype(np.uint8)
+    
+def save_debug_image(tensor_orig, tensor_transformed, filename):
+    assert tensor_orig.size() == tensor_transformed.size()
+    result = Image.fromarray(recover_image(tensor_transformed.cpu().numpy())[0])
+    orig = Image.fromarray(recover_image(tensor_orig.cpu().numpy())[0])
+    new_im = Image.new('RGB', (result.size[0] * 2 + 5, result.size[1]))
+    new_im.paste(orig, (0,0))
+    new_im.paste(result, (result.size[0] + 5,0))
+    new_im.save(filename)
 
 # Training the model
 def main():
@@ -317,8 +326,10 @@ def main():
     STYLE_IMAGE = './style.jpg'
     # WEIGHTS
     FEATURE_WEIGHT = 1.0
-    STYLE_WEIGHT = 1.0
+    STYLE_WEIGHT = 5.0
     TVR_WEIGHT = 1.0
+    # Learning Rate
+    LR = 0.001
     
     # Device setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -364,12 +375,13 @@ def main():
     model = StyleTransferModel()
     model.to(device)
     torch.set_default_tensor_type('torch.FloatTensor')
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=0)
 
     # Train the model
     model.train()
     count = 0
-    steps = 200
+    max_epoch = 4
+    epoch = 1
     mse = nn.MSELoss()
 
     # DEBUG
@@ -430,12 +442,20 @@ def main():
             total_tvr_loss += tvr_loss
             
             # Debug msg
-            if count % 5 == 0:
-                msg = f'{time.ctime()} [{count} / {steps}] feature:{total_feature_loss} style:{total_style_loss} tvr:{total_tvr_loss} total:{total_feature_loss + total_style_loss + total_tvr_loss}'
-                save_debug_image(x, y.detach(), "../debug/{}.png".format(base_steps + count))
+            if count % 100 == 0:
+                msg = f'{time.ctime()} [{count} / {max_epoch * 4000}] feature:{total_feature_loss} style:{total_style_loss} tvr:{total_tvr_loss} total:{total_feature_loss + total_style_loss + total_tvr_loss}'
+                model.eval()
+                y = model(x)
+                save_debug_image(x, y.detach(), "./debug/{}.png".format(count))
+                model.train()
                 print(msg)
-            
-            if count >= steps:
+                
+            if count % 4000 == 0:
+                optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
+                epoch += 1
+                count = 0
+                
+            if epoch >= max_epoch:
                 return
     
     return
