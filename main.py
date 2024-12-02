@@ -136,6 +136,22 @@ def calc_style_loss(style_features, gen_features):
     return loss
 
 
+def compute_loss(vgg, content, style, generated, content_weight, style_weight):
+    # Extract features
+    style_features, _ = vgg(style)
+    content_features, content_content = vgg(content)
+    generated_style, generated_content = vgg(generated)
+
+    # Calculate losses
+    content_loss = calc_content_loss(content_content, generated_content)
+    style_loss = calc_style_loss(style_features, generated_style)
+
+    # Total loss
+    total_loss = (content_weight * content_loss) + (style_weight * style_loss)
+
+    return total_loss
+
+
 # Function to perform style transfer
 def style_transfer(
     content_path,
@@ -163,20 +179,12 @@ def style_transfer(
     optimizer = optim.SGD([generated], lr=lr)
 
     for i in range(iterations):
-        generated_style, generated_content = vgg(
-            generated
-        )  # Get the features of the target image
-        content_features, content_content = vgg(
-            content
-        )  # Get the features of the content image
-        style_features, _ = vgg(style)  # Get the features of the style image
-
-        content_loss = calc_content_loss(content_content, generated_content)
-        style_loss = calc_style_loss(style_features, generated_style)
-
-        total_loss = content_weight * content_loss + style_weight * style_loss
-
         optimizer.zero_grad()  # Zero the gradients
+
+        total_loss = compute_loss(
+            vgg, content, style, generated, content_weight, style_weight
+        )
+
         total_loss.backward()  # Backpropagate the loss
         optimizer.step()  # Update the target image
 
