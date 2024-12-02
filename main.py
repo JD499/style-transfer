@@ -1,12 +1,10 @@
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision
 from PIL import Image
 from torchvision import models, transforms
 from torchvision.models import VGG19_Weights
-from torchvision.utils import save_image
 
 
 # Set device as Metal, CUDA, or CPU
@@ -58,6 +56,19 @@ def load_image(img_path, size=(512, 512)):
     """
 
     return image
+
+
+def save_image(tensor, filename):
+    # Clone the tensor to CPU
+    image = tensor.cpu().clone().squeeze(0)
+
+    # Denormalize
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    image = image * std + mean
+
+    # Save image
+    torchvision.utils.save_image(image, filename)
 
 
 # Create a class VGG, which inherits the base class for all neural network modules
@@ -169,47 +180,10 @@ def style_transfer(
         total_loss.backward()  # Backpropagate the loss
         optimizer.step()  # Update the target image
 
-        # if i % 50 == 0: # Print the loss every 50 iterations
-        #    print(f'Iteration {i}, Loss: {loss.item()}')
-
-        if i % 10 == 0:
+        if i % 50 == 0:
             print(f"Iteration {i}, Loss: {total_loss.item()}")
 
-            # Print the image every 10 iterations
-            output_image = (
-                generated.cpu().clone().squeeze(0).detach().numpy()
-            )  # Remove batch dimension (squeeze), convert to a NumPy array for visualization
-            output_image = output_image.transpose(
-                1, 2, 0
-            )  # If the tensor shape is (C, H, W), we need to transpose it to (H, W, C)
-
-            # Denormalize the image
-            mean = np.array([0.485, 0.456, 0.406])
-            std = np.array([0.229, 0.224, 0.225])
-            output_image = std * output_image + mean  # Denormalize
-            output_image = np.clip(
-                output_image, 0, 1
-            )  # Clip values to [0, 1] range for display
-
-            # Convert to PIL image
-            output_image = (output_image * 255).astype(np.uint8)  # Convert to uint8
-            output_image = Image.fromarray(output_image)  # Convert to PIL image
-
-            # Display the image
-            plt.imshow(output_image)
-            plt.title(f"Iteration {i}")
-            plt.axis("off")  # Hide the axis
-
-            # Save the image
-            output_image.save(f"output_image{i}.jpg")
-            """
-            output_image = target.cpu().clone().squeeze(0)
-            output_image = transforms.ToPILImage()(output_image)
-            plt.imshow(output_image)
-            plt.title(f'Iteration {i}')
-            output_image.save(f'style-transfer/images/output_image{i}.jpg') 
-            plt.show() 
-            """
+            save_image(generated, f"output_image{i}.jpg")
 
     return generated  # Return the target image
 
