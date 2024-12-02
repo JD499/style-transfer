@@ -90,23 +90,26 @@ def calc_content_loss(gen_feature, orig_feature):
     return 0.5 * F.mse_loss(gen_feature, orig_feature)
 
 
-# Function to calculate style loss
+def gram_matrix(features):
+    batch_size, channels, height, width = features.size()
+    features = features.view(channels, height * width)
+    return torch.mm(features, features.t())
+
+
+# Style Loss
 def calc_style_loss(gen_features, style_features):
-    style_l = 0
+    loss = 0
     for gen, style in zip(gen_features, style_features):
-        _, c, h, w = gen.size()  # Get the dimensions of the generated features
-        gen = gen.view(c, h * w)  # Reshape the generated features
-        style = style.view(c, h * w)  # Reshape the style features
-        gen = torch.mm(
-            gen, gen.t()
-        )  # Calculate the Gram matrix for the generated features
-        style = torch.mm(
-            style, style.t()
-        )  # Calculate the Gram matrix for the style features
-        style_l += torch.mean((gen - style) ** 2) / (
-            c * h * w
-        )  # Calculate the mean squared error loss and normalize
-    return style_l  # Return the style loss
+        gen_gram = gram_matrix(gen)
+        style_gram = gram_matrix(style)
+
+        batch_size, channels, height, width = gen.size()
+
+        N = channels
+        M = height * width
+
+        loss += (1.0 / (4 * N**2 * M**2)) * F.mse_loss(gen_gram, style_gram)
+    return loss
 
 
 # Function to perform style transfer
