@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from PIL import Image
 from torchvision import models, transforms
@@ -87,7 +86,7 @@ class VGG(nn.Module):
 
 # Content Loss
 def calc_content_loss(gen_feature, orig_feature):
-    return 0.5 * F.mse_loss(gen_feature, orig_feature)
+    return 0.5 * torch.sum((gen_feature - orig_feature) ** 2)
 
 
 def gram_matrix(features):
@@ -108,12 +107,12 @@ def calc_style_loss(gen_features, style_features):
         N = channels
         M = height * width
 
-        loss += (1.0 / (4 * N**2 * M**2)) * F.mse_loss(gen_gram, style_gram)
+        loss += (1.0 / (4 * N**2 * M**2)) * torch.sum((gen_gram - style_gram) ** 2)
     return loss
 
 
 # Function to perform style transfer
-def style_transfer(content_path, style_path, iterations=300, lr=0.01):
+def style_transfer(content_path, style_path, iterations=300, lr=1e-7):
     device = set_device()
     print(f"Using device: {device}")
 
@@ -196,7 +195,7 @@ def style_transfer(content_path, style_path, iterations=300, lr=0.01):
 
 
 # Loss calculation HYPERPARAMETER weights
-alpha = 1.0  # Weight for content loss
+alpha = 1e-3  # Weight for content loss
 beta = 1.0  # Weight for style loss
 
 
