@@ -57,5 +57,5 @@ This project aims to apply **Style Transfer** to **spherical (360-degree) images
 ## **How to Run the Code**
 1. Clone the repository:
    ```bash
-   git clone <repository_url>
-   cd <repository_name>
+   git clone https://github.com/JD499/style-transfer.git
+   cd style-transfer
