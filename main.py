@@ -65,10 +65,17 @@ class VGG(nn.Module):
     # Define constructor method
     def __init__(self):
         super(VGG, self).__init__()
-        # Required feature layers (Indicates what specific layers we will extract from)
-        self.req_features = ["0", "5", "10", "19", "28"]
-        # Load the VGG19 model and keep the first 29 layers
+
+        # Load first 29 layers of VGG19 Model
         self.model = models.vgg19(weights=VGG19_Weights.IMAGENET1K_V1).features[:29]
+
+        # Replace MaxPool with AvgPool
+        for i, layer in enumerate(self.model):
+            if isinstance(layer, nn.MaxPool2d):
+                self.model[i] = nn.AvgPool2d(kernel_size=2)
+
+        # Required feature layers (Indicates what specific layers we will extract from)
+        self.req_features = [0, 5, 10, 19, 28]
 
     # Define the foward pass method
     def forward(self, x):
@@ -78,7 +85,7 @@ class VGG(nn.Module):
             x = layer(x)  # Pass the input through each layer
 
             # IF THE LAYER WE ARE ON IS AN FEATURE-EXTRACTION LAYER
-            if str(layer_num) in self.req_features:
+            if layer_num in self.req_features:
                 features.append(x)  # Append the features from the required layers
 
         return features  # Return the list of features
