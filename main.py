@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -187,15 +189,149 @@ def style_transfer(
     return generated
 
 
+# Convert the youtube EAC format to equirectangular
+def convert_eac_equirectangular(frame):
+    # Get dimensions of frame
+    height, width = frame.shape[:2]
+
+    # Calculate dimensions of each cube face
+    face_width = width // 3  # Each face is 1/3 of the width
+    face_height = height // 2  # Each face is 1/2 of the height
+
+    # Extract cube faces from the frame
+    # - EAC format is a 3x2 matrix
+    # - Layout: [Left, Front, Right]
+    #          [Down, Back, Up]
+    faces = {
+        "left": frame[0:face_height, 0:face_width],
+        "front": frame[0:face_height, face_width : face_width * 2],
+        "right": frame[0:face_height, face_width * 2 : width],
+        "down": cv2.rotate(
+            frame[face_height:height, 0:face_width], cv2.ROTATE_90_CLOCKWISE
+        ),
+        "back": cv2.rotate(
+            frame[face_height:height, face_width : face_width * 2],
+            cv2.ROTATE_90_COUNTERCLOCKWISE,
+        ),
+        "up": cv2.rotate(
+            frame[face_height:height, face_width * 2 : width], cv2.ROTATE_90_CLOCKWISE
+        ),
+    }
+
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Spherical coordinates
+    # phi: longitude angle (-π to π)
+    # theta: latitude angle (π/2 to -π/2)
+    phi = np.linspace(-np.pi, np.pi, width)
+    theta = np.linspace(np.pi / 2, -np.pi / 2, height)
+    phi, theta = np.meshgrid(phi, theta)
+
+    # Convert spherical coordinates to cartesian coordinates
+    # x = cos(theta) * sin(phi)
+    # y = sin(theta)
+    # z = cos(theta) * cos(phi)
+    x = np.cos(theta) * np.sin(phi)
+    y = np.sin(theta)
+    z = np.cos(theta) * np.cos(phi)
+
+    # Map each equirectangular pixel to corresponding cube face
+    for i in range(height):
+        for j in range(width):
+            # Get absolute values to determine which face to use
+            abs_x, abs_y, abs_z = abs(x[i, j]), abs(y[i, j]), abs(z[i, j])
+            max_val = max(abs_x, abs_y, abs_z)
+
+            # Map pixel to cube face based on largest coordinate
+            if abs_x == max_val:
+                # Right or left face
+                if x[i, j] > 0:
+                    face = faces["right"]
+                    u = (-z[i, j] / abs_x + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_x + 1) * face.shape[0] / 2
+                else:
+                    face = faces["left"]
+                    u = (z[i, j] / abs_x + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_x + 1) * face.shape[0] / 2
+            elif abs_y == max_val:
+                # Up or down face
+                if y[i, j] > 0:
+                    face = faces["up"]
+                    u = (x[i, j] / abs_y + 1) * face.shape[1] / 2
+                    v = (z[i, j] / abs_y + 1) * face.shape[0] / 2
+                else:
+                    face = faces["down"]
+                    u = (x[i, j] / abs_y + 1) * face.shape[1] / 2
+                    v = (-z[i, j] / abs_y + 1) * face.shape[0] / 2
+            else:
+                # Front or back face
+                if z[i, j] > 0:
+                    face = faces["front"]
+                    u = (x[i, j] / abs_z + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_z + 1) * face.shape[0] / 2
+                else:
+                    face = faces["back"]
+                    u = (-x[i, j] / abs_z + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_z + 1) * face.shape[0] / 2
+
+            u = min(max(0, int(u)), face.shape[1] - 1)
+            v = min(max(0, int(v)), face.shape[0] - 1)
+
+            # Assign to equirectangular image
+            frame[i, j] = face[v, u]
+
+    return frame
+
+
+def get_frame_from_video(video_path, frame_number=0, output_path="frame.jpg"):
+    # Open video file
+    video = cv2.VideoCapture(video_path)
+
+    # Go to frame
+    video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+
+    # Read frame
+    success, frame = video.read()
+    if not success:
+        print("Failed to extract frame")
+        return output_path
+
+    # Convert BGR to RGB
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # Convert frame from EAC to equirectangular
+    equirect_frame = convert_eac_equirectangular(frame)
+
+    # Save the converted frame
+    Image.fromarray(equirect_frame).save(output_path)
+    print(f"Converted frame saved as {output_path}")
+
+    video.release()
+    return output_path
+
+
 if __name__ == "__main__":
+    process_video = True
+    frame_number = 100
+
+    # Input paths
     content_path = "content.jpg"
     style_path = "style.jpg"
     output_path = "output.jpg"
+    video_path = "360video.mp4"
 
+    # Process video
+    if process_video:
+        print("Processing video frame...")
+        content_path = get_frame_from_video(
+            video_path, frame_number=frame_number, output_path="content.jpg"
+        )
+
+    # Style transfer
     print("Starting style transfer")
-
     output = style_transfer(content_path=content_path, style_path=style_path)
 
+    # Save result image
     print("Saving output image")
     save_image(output, output_path)
     print(f"Output saved as {output_path}")
