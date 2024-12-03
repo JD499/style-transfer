@@ -455,7 +455,7 @@ def main():
                 print(msg)
                 
             if count % 10250 == 0:
-                # optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
+                optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
                 epoch += 1
                 
             if epoch >= max_epoch:
