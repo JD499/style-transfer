@@ -19,7 +19,6 @@ def set_device():
 
     return torch.device("cpu")
 
-
 # Load and preprocess image
 def load_image(img_path, size=(512, 512)):
     # Open image
@@ -40,7 +39,6 @@ def load_image(img_path, size=(512, 512)):
     image = transform(image).unsqueeze(0)
     return image
 
-
 # Save processed tensor as image
 def save_image(tensor, filename):
     # Clone tensor to CPU and remove batch dimension
@@ -53,7 +51,6 @@ def save_image(tensor, filename):
 
     # Save image to file
     torchvision.utils.save_image(image, filename)
-
 
 class VGG(nn.Module):
     def __init__(self):
