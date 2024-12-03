@@ -146,9 +146,12 @@ def style_transfer(
     content_path,
     style_path,
     iterations=300,
+    optimizer="sgd",
     lr=8000,
     content_weight=1e-60,
     style_weight=1,
+    save_interval=50,
+    output_prefix="output"
 ):
     # Setup device
     device = set_device()
@@ -165,28 +168,46 @@ def style_transfer(
     # target.required_grad_(True): gradients are computed during backward pass
     # target.to(device): moves the target tensor to our device
     generated = content.clone().requires_grad_(True).to(device)
+    
+    # Set up optimizer
+    if optimizer == "sgd":
+        optimizer = optim.SGD([generated], lr=lr, momentum=0.9)
 
-    # Initialize optimizer
-    optimizer = optim.SGD([generated], lr=lr, momentum=0.9)
-
+    if optimizer == "adam":
+        optimizer = optim.Adam([generated], lr=lr/800)
+    
     # Optimization loop
+    loss_history = []
+    best_loss = float('inf')
+    
     for i in range(iterations):
         optimizer.zero_grad()
-
+        
         loss = compute_loss(
-            vgg, content, style, generated, content_weight, style_weight
+            vgg, content, style, generated,
+            content_weight, style_weight
         )
-
+        
+        loss_history.append(loss.item())
+        
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+            
         loss.backward()
         optimizer.step()
-
-        # Print info & image every 50 iterations
-        if i % 50 == 0:
+        
+        if save_interval and i % save_interval == 0:
             print(f"Iteration {i}, Loss: {loss.item()}")
+            save_image(generated, f"{output_prefix}_iter{i}.jpg")
 
-            save_image(generated, f"output_image{i}.jpg")
+    final_image_path = f"{output_prefix}_final.jpg"
+    save_image(generated, final_image_path)
+    print(f"Final iteration {iterations}, Loss: {loss.item()}")
+    print(f"Saved final image to {final_image_path}")
+    
 
-    return generated
+    
+    return generated, best_loss, loss_history
 
 
 # Convert the youtube EAC format to equirectangular
@@ -310,8 +331,53 @@ def get_frame_from_video(video_path, frame_number=0, output_path="frame.jpg"):
     return output_path
 
 
+def style_transfer_search(
+    content_path,
+    style_path,
+    config,
+    output_prefix="search"
+):
+    results = []
+    
+    for optimizer, optimizer_config in config.items():
+        for lr in optimizer_config['learning_rates']:
+            for content_weight in optimizer_config['content_weights']:
+                for style_weight in optimizer_config['style_weights']:
+                    print(f"\nTrying: {optimizer}, lr={lr}, cw={content_weight}, sw={style_weight}")
+                    
+                    generated, best_loss, loss_history = style_transfer(
+                        content_path=content_path,
+                        style_path=style_path,
+                        optimizer=optimizer,
+                        lr=lr,
+                        content_weight=content_weight,
+                        style_weight=style_weight,
+                        output_prefix=f"{output_prefix}_{optimizer}_lr{lr}"
+                    )
+                    
+                    results.append({
+                        'optimizer': optimizer,
+                        'learning_rate': lr,
+                        'content_weight': content_weight,
+                        'style_weight': style_weight,
+                        'best_loss': best_loss,
+                        'loss_history': loss_history,
+                        'output': generated
+                    })
+    
+    sorted_results = sorted(results, key=lambda x: x['best_loss'])
+    print("\nResults ranked by loss:")
+    for i, result in enumerate(sorted_results, 1):
+        print(f"\n{i}. Loss: {result['best_loss']:.6f}")
+        print(f"   Optimizer: {result['optimizer']}")
+        print(f"   Learning rate: {result['learning_rate']}")
+        
+    return sorted_results
+
 if __name__ == "__main__":
+    # Control flags
     process_video = True
+    do_search = True
     frame_number = 100
 
     # Input paths
@@ -327,14 +393,38 @@ if __name__ == "__main__":
             video_path, frame_number=frame_number, output_path="content.jpg"
         )
 
-    # Style transfer
-    print("Starting style transfer")
-    output = style_transfer(content_path=content_path, style_path=style_path)
+    if do_search:
+        print("Starting style transfer with hyperparameter search")
+        config = {
+            "adam": {
+                "learning_rates": [10.0, 20.0, 30.0, 50.0],
+                "content_weights": [1e-60],
+                "style_weights": [1.0],
+            },
+            "sgd": {
+                "learning_rates": [4000.0, 8000.0, 12000.0],
+                "content_weights": [1e-60],
+                "style_weights": [1.0],
+            },
+        }
+        results = style_transfer_search(
+            content_path=content_path,
+            style_path=style_path,
+            config=config
+        )
+        print("Saving best result from search")
+        save_image(results[0]['output'], output_path)
+    else:
+        print("Starting single style transfer")
+        generated_image, final_loss, loss_history = style_transfer(
+            content_path=content_path,
+            style_path=style_path,
+            output_prefix="single_transfer"
+        )
+        print("Saving final output image")
+        save_image(generated_image, output_path)
 
-    # Save result image
-    print("Saving output image")
-    save_image(output, output_path)
-    print(f"Output saved as {output_path}")
+    print(f"Final output saved as {output_path}")
 
     # TODO: Add more optimizers
     # TODO: Make a more consistent config path/description
