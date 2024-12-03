@@ -335,3 +335,26 @@ if __name__ == "__main__":
     print("Saving output image")
     save_image(output, output_path)
     print(f"Output saved as {output_path}")
+
+    # TODO: Add more optimizers
+    # TODO: Make a more consistent config path/description
+    # TODO: Use config to cycle learning rates, weights, optimizers
+    # TODO: Add more console out to describe what is happening
+    # TODO: Generate more plots/visualizations
+    # TODO: Make the images show more growth between them (Loss stuff)
+
+    '''
+    2.  Implement a deep learning system, train, validate and test it. This is the part that will
+        take most of the time. You may explore various neural network architectures (e.g., MLP, CNN, LSTM,
+        RNN). You will do a hyper-parameter search, which includes but is not limited to: network size
+        (number of layers, number of nodes per layer), activation functions, learning rate, batch size, number
+        of epochs, optimizer, loss function, dropout rate, regularization method, random restarts, data split
+        etc. I encourage you to use PyTorch, but you are welcome to use any other framework.
+
+    3.  Write a report describing what you did. The report is a mini research paper. It contains title,
+        author names, abstract, and several sections that cover: introduction to the problem, what you set
+        out to achieve, methodology, experimental setup, explanation of results, conclusion that summarizes
+        what we learn from your work. Include useful plots of the data you collected during training (e.g.
+        accuracy, loss, convergence time, memory usage etc), images, diagrams or other visuals that facilitate
+        your exposition. Do not include too much code, unless it is really necessary.
+    '''
