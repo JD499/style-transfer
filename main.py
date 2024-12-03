@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Import required packages
 import torch
 import torch.optim as optim
@@ -8,337 +9,365 @@ from torchvision.models import VGG19_Weights
 from PIL import Image
 import matplotlib.pyplot as plt
 
+=======
+import cv2
+>>>>>>> d8c190d3fe371e032d537d59b59481c44cc84150
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision
+from PIL import Image
+from torchvision import models, transforms
+from torchvision.models import VGG19_Weights
 
-# LOG: Struggles
-"""
-1. Upon getting the network working and figuring out the renormalization the network would
-run and nothing would happen to theinput image. It turned out that by setting both the weight
-"""
 
-# Assign user's device for optimal runtime (GPU or CPU)
+# Set device as Metal, CUDA, or CPU
 def set_device():
     if torch.backends.mps.is_available():
-        return torch.device("mps")  # Use MPS (Metal Performance Shaders) if available
-    elif torch.cuda.is_available():
-        return torch.device("cuda")  # Use CUDA (GPU) if available
-    else:
-        return torch.device("cpu")  # Otherwise, use CPU
+        return torch.device("mps")
 
-# Define image transformations (USED IN LOAD_IMAGE FUNCTION)
-transform = transforms.Compose([
-    # Convert the image to a tensor : t
-    transforms.ToTensor(),  
-    # mean (from ImageNet dataset) = (0.485, 0.456, 0.406)
-    # sd   (from ImageNet dataset) = (0.229, 0.224, 0.225)
-    # t_n = (t - mean) / std
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))  # Normalize the image
-])
+    if torch.cuda.is_available():
+        return torch.device("cuda")
 
-# Load & preprocess an image
-def load_image(img_path, transform=None, max_size=400, shape=None):
-    image = Image.open(img_path).convert('RGB')  # Open the image and convert to RGB (Three Channels)
-    if max_size:
-        size = max(max(image.size), max_size)    # Resize the image to the max size
-        image = transforms.Resize(size)(image)   # Apply the resize transformation
+    return torch.device("cpu")
 
-    if shape:
-        image = transforms.Resize(shape)(image)  # Resize the image to the given shape
-    
-    if transform:
-        image = transform(image).unsqueeze(0)    # Apply the transformation and add a batch dimension
-    
-    '''
-    # Un-Transform CODE
-    # Remove the batch dimension (squeeze) and convert to a NumPy array for visualization
-    image_np = image.squeeze(0).detach().numpy()  
-    # If the tensor shape is (C, H, W), we need to transpose it to (H, W, C)
-    image_np = image_np.transpose(1, 2, 0)
-    # If the image is normalized (e.g., using mean/std), you may need to denormalize it
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
-    image_np = (image_np * std) + mean  # Denormalize
-    # Clip values to [0, 1] range for display
-    image_np = image_np.clip(0, 1)
-    # Display the image
-    plt.imshow(image_np)
-    plt.title('After Transform & Stitched Back Together')
-    plt.show()
-    '''
 
-    return image.to(device)  # Move the image to the appropriate device
+# Load and preprocess image
+def load_image(img_path, size=(512, 512)):
+    # Open image
+    image = Image.open(img_path).convert("RGB")
 
-# Create a class VGG, which inherits the base class for all neural network modules
+    # Resize image, default size 512x512
+    image = transforms.Resize(size)(image)
+
+    # Convert to tensor and normalize
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ]
+    )
+
+    # Add batch dimension
+    image = transform(image).unsqueeze(0)
+    return image
+
+
+# Save processed tensor as image
+def save_image(tensor, filename):
+    # Clone tensor to CPU and remove batch dimension
+    image = tensor.cpu().clone().squeeze(0)
+
+    # Denormalize image
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    image = image * std + mean
+
+    # Save image to file
+    torchvision.utils.save_image(image, filename)
+
+
 class VGG(nn.Module):
-
-    # Define constructor method
     def __init__(self):
-
         super(VGG, self).__init__()
-        # Required feature layers (Indicates what specific layers we will extract from)
-        """
-        Target layers from paper :  
-                  relu3 3 for the content 
-                  relu1 2, relu2 2, relu1 2, relu3 3, relu4 3
-        
-        Extracting layers 3,8,15,24 corresponding with relu1_2, relu2_2, relu3_3, relu4_3 in paper
-        Sequential(
-        (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (1): ReLU(inplace=True)
-        (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (3): ReLU(inplace=True)
-        (4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        (5): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (6): ReLU(inplace=True)
-        (7): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (8): ReLU(inplace=True)
-        (9): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        (10): Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (11): ReLU(inplace=True)
-        (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (13): ReLU(inplace=True)
-        (14): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (15): ReLU(inplace=True)
-        (16): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (17): ReLU(inplace=True)
-        (18): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        (19): Conv2d(256, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (20): ReLU(inplace=True)
-        (21): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (22): ReLU(inplace=True)
-        (23): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (24): ReLU(inplace=True)
-        (25): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (26): ReLU(inplace=True)
-        (27): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        (28): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (29): ReLU(inplace=True)
-        (30): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (31): ReLU(inplace=True)
-        (32): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (33): ReLU(inplace=True)
-        (34): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        (35): ReLU(inplace=True)
-        (36): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        )
-        """
-        self.req_features = ['3','8','15','24']
-        # Load the VGG19 model and keep the first 29 layers
+
+        # Load VGG19 model (first 29 layers)
         self.model = models.vgg19(weights=VGG19_Weights.IMAGENET1K_V1).features[:29]
-        
-    # Define the foward pass method
+
+        # Replace MaxPool with AvgPool
+        for i, layer in enumerate(self.model):
+            if isinstance(layer, nn.MaxPool2d):
+                self.model[i] = nn.AvgPool2d(kernel_size=2, stride=2)
+
+        # Define layers for feature extraction
+
+        # style features (conv1_1, conv2_1, conv3_1, conv4_1, conv5_1)
+        self.style_layers = [0, 5, 10, 19, 28]
+
+        # content features (conv4_2)
+        self.content_layer = 21
+
     def forward(self, x):
+        features = []
+        content = None
 
-        features = []  # List to store the features
-        # For each layer in the model
+        # Extract features from selected layers
         for layer_num, layer in enumerate(self.model):
-            x = layer(x)  # Pass the input through each layer
+            x = layer(x)
 
-            # IF THE LAYER WE ARE ON IS AN FEATURE-EXTRACTION LAYER
-            if str(layer_num) in self.req_features:
-                features.append(x)  # Append the features from the required layers
+            # Collect style features
+            if layer_num in self.style_layers:
+                features.append(x)
 
-        return features  # Return the list of features
+            # Collect content features
+            if layer_num == self.content_layer:
+                content = x
 
-def gram_matrix(input):
-    # a     - batch size
-    # b     - number of feature maps
-    # c,d   - dimensions of feature map
-    a,b,c,d = input.size()
+        return features, content
 
-    # Resive feature matrix
-    features = input.view(a * b, c * d)
 
-    # Compute the gram product
-    G = torch.mm(features, features.t())
-    
-    # Return normalized values by dividing by number of elemens in each feature map
-    return G.div(a * b, c * d)
+# Calculate content loss
+def calc_content_loss(orig_feature, gen_feature):
+    return 0.5 * torch.sum((gen_feature - orig_feature) ** 2)
 
-class StyleLoss(nn.Module):
-    def __init__(self, target):
-        super(StyleLoss, self).__init__()
-        self.targt = gram_matrix(target).detach()
-    
-    def forward(self, input):
-        G = gram_matrix(input)
-        self.loss = F.mse_loss(G, self.target)
-        return input
 
-class ContentLoss(nn.Module):
-    def __init__(self, target):
-        super(ContentLoss, self).__init__()
-        self.target = target.detach()
-        
-    def forward(self, input):
-        self.loss = F.mse_loss(input, self.target)
-        return input
+# Calculate Gram matrix
+def gram_matrix(features):
+    batch_size, channels, height, width = features.size()
+    features = features.view(channels, height * width)
+    return torch.mm(features, features.t())
 
-# Normalization layer
-# This normalization can be modified if want to use different types of normalization
-class Normalization(nn.Module):
-    def __init__(self, mean, std):
-        super(Normalization, self).__init__()
-        
-        # Image tensor will be BxCxHxW square matrix
-        # Resize mean and std to C x 1 x 1 Matrix to work with image tensor
-        self.mean = torch.tensor(mean).view(-1,1,1)
-        self.std = torch.tensor(std).view(-1,1,1)
-        
-    def forward(self, img):
-        return (img - self.mean) / self.std
 
-# Build model and components
-# From the paper - 
-# Content Loss : relu3_3 (15)
-# Style loss : relu1_2 (3), relu2_2 (8), relu3_3, relu4_3
+# Calculate style loss
+def calc_style_loss(style_features, gen_features):
+    loss = 0
+    for style, gen in zip(style_features, gen_features):
+        # Compute Gram matrices
+        style_gram = gram_matrix(style)
+        gen_gram = gram_matrix(gen)
 
-def build_model(cnn : nn.Module, norm_mean, norm_std, style_img, content_img):
-    # Create Normalization layer as first layer
-    model = nn.Sequential(Normalization(norm_mean, norm_std))
+        # Get feature dimensions
+        batch_size, channels, height, width = gen.size()
+        N = channels
+        M = height * width
 
-    for layer in cnn.children():
-        # Append loss 
+        # Add normalized loss for this layer
+        loss += (1.0 / (4 * N**2 * M**2)) * torch.sum((gen_gram - style_gram) ** 2)
+    return loss
 
-# Function to perform style transfer
-def style_transfer(vgg, content, style, iterations=100, lr=0.01):
+
+# Compute total loss (content and style)
+def compute_loss(vgg, content, style, generated, content_weight, style_weight):
+    # Extract features
+    style_features, _ = vgg(style)
+    content_features, content_content = vgg(content)
+    generated_style, generated_content = vgg(generated)
+
+    # Calculate individual losses
+    content_loss = calc_content_loss(content_content, generated_content)
+    style_loss = calc_style_loss(style_features, generated_style)
+
+    # Combine losses with weights
+    total_loss = (content_weight * content_loss) + (style_weight * style_loss)
+
+    return total_loss
+
+
+# Style transfer
+def style_transfer(
+    content_path,
+    style_path,
+    iterations=300,
+    lr=8000,
+    content_weight=1e-60,
+    style_weight=1,
+):
+    # Setup device
+    device = set_device()
+    print(f"Using device: {device}")
+
+    # Load images
+    content = load_image(content_path).to(device)
+    style = load_image(style_path).to(device)
+
+    # Setup VGG
+    vgg = VGG().to(device).eval()
 
     # Clone the content image and set requires_grad to True
     # target.required_grad_(True): gradients are computed during backward pass
     # target.to(device): moves the target tensor to our device
-    target = content.clone().requires_grad_(True).to(device)
+    generated = content.clone().requires_grad_(True).to(device)
 
-    # Initialize the optimizer
-    optimizer = optim.SGD([target], lr=lr)
-    
+    # Initialize optimizer
+    optimizer = optim.SGD([generated], lr=lr, momentum=0.9)
+
+    # Optimization loop
     for i in range(iterations):
+        optimizer.zero_grad()
 
-        target_features  = vgg(target)  # Get the features of the target image
-        content_features = vgg(content) # Get the features of the content image
-        style_features   = vgg(style)   # Get the features of the style image
-        
-        content_loss = calc_content_loss(target_features[1], content_features[1]) # Calculate the content loss
-        style_loss   = calc_style_loss(target_features,      style_features)      # Calculate the style loss
-        
-        # Calculate the total loss
-        loss = content_weight * content_loss + style_weight * style_loss
-        
-        optimizer.zero_grad() # Zero the gradients
-        loss.backward()       # Backpropagate the loss
-        optimizer.step()      # Update the target image
+        loss = compute_loss(
+            vgg, content, style, generated, content_weight, style_weight
+        )
 
-        # if i % 50 == 0: # Print the loss every 50 iterations
-        #    print(f'Iteration {i}, Loss: {loss.item()}')
+        loss.backward()
+        optimizer.step()
 
-        if i % 10 == 0:
-            print(f'Iteration {i}, Loss: {loss.item()}')
-            
-            # Print the image every 10 iterations
-            output_image = target.cpu().clone().squeeze(0).detach().numpy()  # Remove batch dimension (squeeze), convert to a NumPy array for visualization
-            output_image = output_image.transpose(1, 2, 0)  # If the tensor shape is (C, H, W), we need to transpose it to (H, W, C)
-            
-            # Denormalize the image
-            mean = np.array([0.485, 0.456, 0.406])
-            std = np.array([0.229, 0.224, 0.225])
-            output_image = std * output_image + mean  # Denormalize
-            output_image = np.clip(output_image, 0, 1)  # Clip values to [0, 1] range for display
-            
-            # Convert to PIL image
-            output_image = (output_image * 255).astype(np.uint8)  # Convert to uint8
-            output_image = Image.fromarray(output_image)  # Convert to PIL image
-            
-            # Display the image
-            plt.imshow(output_image)
-            plt.title(f'Iteration {i}')
-            plt.axis('off')  # Hide the axis
-            
-            # Save the image
-            output_image.save(f'images/output_image{i}.jpg')
-            '''
-            output_image = target.cpu().clone().squeeze(0)
-            output_image = transforms.ToPILImage()(output_image)
-            plt.imshow(output_image)
-            plt.title(f'Iteration {i}')
-            output_image.save(f'style-transfer/images/output_image{i}.jpg') 
-            plt.show() 
-            '''     
+        # Print info & image every 50 iterations
+        if i % 50 == 0:
+            print(f"Iteration {i}, Loss: {loss.item()}")
 
-    
-    return target  # Return the target image
+            save_image(generated, f"output_image{i}.jpg")
+
+    return generated
 
 
+# Convert the youtube EAC format to equirectangular
+def convert_eac_equirectangular(frame):
+    # Get dimensions of frame
+    height, width = frame.shape[:2]
+
+    # Calculate dimensions of each cube face
+    face_width = width // 3  # Each face is 1/3 of the width
+    face_height = height // 2  # Each face is 1/2 of the height
+
+    # Extract cube faces from the frame
+    # - EAC format is a 3x2 matrix
+    # - Layout: [Left, Front, Right]
+    #          [Down, Back, Up]
+    faces = {
+        "left": frame[0:face_height, 0:face_width],
+        "front": frame[0:face_height, face_width : face_width * 2],
+        "right": frame[0:face_height, face_width * 2 : width],
+        "down": cv2.rotate(
+            frame[face_height:height, 0:face_width], cv2.ROTATE_90_CLOCKWISE
+        ),
+        "back": cv2.rotate(
+            frame[face_height:height, face_width : face_width * 2],
+            cv2.ROTATE_90_COUNTERCLOCKWISE,
+        ),
+        "up": cv2.rotate(
+            frame[face_height:height, face_width * 2 : width], cv2.ROTATE_90_CLOCKWISE
+        ),
+    }
+
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Spherical coordinates
+    # phi: longitude angle (-π to π)
+    # theta: latitude angle (π/2 to -π/2)
+    phi = np.linspace(-np.pi, np.pi, width)
+    theta = np.linspace(np.pi / 2, -np.pi / 2, height)
+    phi, theta = np.meshgrid(phi, theta)
+
+    # Convert spherical coordinates to cartesian coordinates
+    # x = cos(theta) * sin(phi)
+    # y = sin(theta)
+    # z = cos(theta) * cos(phi)
+    x = np.cos(theta) * np.sin(phi)
+    y = np.sin(theta)
+    z = np.cos(theta) * np.cos(phi)
+
+    # Map each equirectangular pixel to corresponding cube face
+    for i in range(height):
+        for j in range(width):
+            # Get absolute values to determine which face to use
+            abs_x, abs_y, abs_z = abs(x[i, j]), abs(y[i, j]), abs(z[i, j])
+            max_val = max(abs_x, abs_y, abs_z)
+
+            # Map pixel to cube face based on largest coordinate
+            if abs_x == max_val:
+                # Right or left face
+                if x[i, j] > 0:
+                    face = faces["right"]
+                    u = (-z[i, j] / abs_x + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_x + 1) * face.shape[0] / 2
+                else:
+                    face = faces["left"]
+                    u = (z[i, j] / abs_x + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_x + 1) * face.shape[0] / 2
+            elif abs_y == max_val:
+                # Up or down face
+                if y[i, j] > 0:
+                    face = faces["up"]
+                    u = (x[i, j] / abs_y + 1) * face.shape[1] / 2
+                    v = (z[i, j] / abs_y + 1) * face.shape[0] / 2
+                else:
+                    face = faces["down"]
+                    u = (x[i, j] / abs_y + 1) * face.shape[1] / 2
+                    v = (-z[i, j] / abs_y + 1) * face.shape[0] / 2
+            else:
+                # Front or back face
+                if z[i, j] > 0:
+                    face = faces["front"]
+                    u = (x[i, j] / abs_z + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_z + 1) * face.shape[0] / 2
+                else:
+                    face = faces["back"]
+                    u = (-x[i, j] / abs_z + 1) * face.shape[1] / 2
+                    v = (-y[i, j] / abs_z + 1) * face.shape[0] / 2
+
+            u = min(max(0, int(u)), face.shape[1] - 1)
+            v = min(max(0, int(v)), face.shape[0] - 1)
+
+            # Assign to equirectangular image
+            frame[i, j] = face[v, u]
+
+    return frame
 
 
-# Loss calculation HYPERPARAMETER weights
-content_weight = 1.0  # Weight for content loss
-style_weight = 100.0   # Weight for style loss
+def get_frame_from_video(video_path, frame_number=0, output_path="frame.jpg"):
+    # Open video file
+    video = cv2.VideoCapture(video_path)
 
-# Call the function to get the device
-device = set_device()
-print(f"Using device: {device}")
+    # Go to frame
+    video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
 
-# Load content and style images
-content = load_image('content.jpeg', transform)  # Load the content image
+    # Read frame
+    success, frame = video.read()
+    if not success:
+        print("Failed to extract frame")
+        return output_path
 
-''' CONVERSION BACK TO NORMAL IMAGE
-# MODIFIED: Convert the tensor back to a PIL image
-content_image = content.cpu().clone().squeeze(0).detach().numpy() # Remove batch dimension (squeeze), convert to a NumPy array for visualization
-content_image = content_image.transpose(1, 2, 0) # If the tensor shape is (C, H, W), we need to transpose it to (H, W, C)
-mean = [0.485, 0.456, 0.406] # If the image is normalized (e.g., using mean/std) ... 
-std = [0.229, 0.224, 0.225]  # ... you may need to denormalize it
-content_image = (content_image * std) + mean  # Denormalize
-content_image = content_image.clip(0, 1) # Clip values to [0, 1] range for display
-# content_image = transforms.ToPILImage()(content_image) # Conver to PIL
-plt.imshow(content_image)
-plt.title('ModiConv | After Load Image')
-plt.show()
+    # Convert BGR to RGB
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-# ORIGINAL: Convert the tensor back to a PIL image
-originalConversion = content.cpu().clone().squeeze(0)  # Move to CPU, clone, and remove batch dimension
-originalConversion = transforms.ToPILImage()(originalConversion)  # Convert to PIL image
-plt.imshow(originalConversion)
-plt.title('OrigConv | After Load Image')
-plt.show()
-'''
+    # Convert frame from EAC to equirectangular
+    equirect_frame = convert_eac_equirectangular(frame)
 
-style   = load_image('style.jpeg',   transform, shape=content.shape[-2:])  # Load the style image with the same shape as the style image
+    # Save the converted frame
+    Image.fromarray(equirect_frame).save(output_path)
+    print(f"Converted frame saved as {output_path}")
 
-# Initialize the model
-vgg = VGG().to(device).eval()  # Move the model to the appropriate device and set it to evaluation mode
+    video.release()
+    return output_path
 
-# Perform style transfer
-output = style_transfer(vgg, content, style)  # Perform style transfer
 
-# Save the output image
-output_image = output.cpu().clone().squeeze(0)        # Move the output image to the CPU and remove the batch dimension
-output_image = transforms.ToPILImage()(output_image)  # Convert the tensor to a PIL (Python Image Library) image
-output_image.save('output_image.jpg')                 # Save the output image
+if __name__ == "__main__":
+    process_video = True
+    frame_number = 100
 
-# Display the output image
-plt.imshow(output_image)
-plt.show()
+    # Input paths
+    content_path = "content.jpg"
+    style_path = "style.jpg"
+    output_path = "output.jpg"
+    video_path = "360video.mp4"
 
-# Modularization: 
-# Content Loss Module
-# Style Loss Module
-# 
-"""
-Style Loss:
-    - How Loss : 
-                - Calculated by taking the gram matrix of the current syle features. Then taking the MSE loss between
-                  the gram matrix and the current img matrix
-    - Why Loss: <Dunno>
+    # Process video
+    if process_video:
+        print("Processing video frame...")
+        content_path = get_frame_from_video(
+            video_path, frame_number=frame_number, output_path="content.jpg"
+        )
 
-Content Loss:
-    - How Loss:
-               - Calculated by taking gam matrix of the current generated features. Then taking the MSE los between
-               the gram matrix and the current img matrix
-               
-Normalization Module: 
-    - Why Normalize : <Dunno>
-    - How Normalize :  
-                    - In example above we take the MSE loss between the style and generated gram matrices
-                    - In example given by prof he takes (img - mean) / std where img matrix is a batch x channel x width x height
-                      sized matrix.
-    Good Math Explanation : https://stats.stackexchange.com/questions/361723/weight-normalization-technique-used-in-image-style-transfer
-"""
+    # Style transfer
+    print("Starting style transfer")
+    output = style_transfer(content_path=content_path, style_path=style_path)
+
+    # Save result image
+    print("Saving output image")
+    save_image(output, output_path)
+    print(f"Output saved as {output_path}")
+
+    # TODO: Add more optimizers
+    # TODO: Make a more consistent config path/description
+    # TODO: Use config to cycle learning rates, weights, optimizers
+    # TODO: Add more console out to describe what is happening
+    # TODO: Generate more plots/visualizations
+    # TODO: Make the images show more growth between them (Loss stuff)
+
+    '''
+    2.  Implement a deep learning system, train, validate and test it. This is the part that will
+        take most of the time. You may explore various neural network architectures (e.g., MLP, CNN, LSTM,
+        RNN). You will do a hyper-parameter search, which includes but is not limited to: network size
+        (number of layers, number of nodes per layer), activation functions, learning rate, batch size, number
+        of epochs, optimizer, loss function, dropout rate, regularization method, random restarts, data split
+        etc. I encourage you to use PyTorch, but you are welcome to use any other framework.
+
+    3.  Write a report describing what you did. The report is a mini research paper. It contains title,
+        author names, abstract, and several sections that cover: introduction to the problem, what you set
+        out to achieve, methodology, experimental setup, explanation of results, conclusion that summarizes
+        what we learn from your work. Include useful plots of the data you collected during training (e.g.
+        accuracy, loss, convergence time, memory usage etc), images, diagrams or other visuals that facilitate
+        your exposition. Do not include too much code, unless it is really necessary.
+    '''
