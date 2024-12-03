@@ -68,6 +68,7 @@ class DownsampleBlock(nn.Module):
                       kernel_size=(9,9),
                       stride=2),
             nn.InstanceNorm2d(32, affine=True),
+            # nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.ReflectionPad2d(2),
             nn.Conv2d(in_channels=32,
@@ -75,6 +76,7 @@ class DownsampleBlock(nn.Module):
                       kernel_size=(3,3),
                       stride=2),
             nn.InstanceNorm2d(64, affine=True),
+            # nn.BatchNorm2d(64),
             nn.ReLU()
         )
         
@@ -98,7 +100,8 @@ class UpsampleBlock(nn.Module):
                       stride=2,
                       padding=1,
                       output_padding=1),
-            nn.InstanceNorm2d(32, affine=True),
+            # nn.InstanceNorm2d(32, affine=True),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.ConvTranspose2d(in_channels=32,
                       out_channels=3,
@@ -106,8 +109,11 @@ class UpsampleBlock(nn.Module):
                       stride= 2,
                       padding=4,
                       output_padding=1),
+            # nn.InstanceNorm2d(3, affine=True), 
+            nn.BatchNorm2d(3),            
             # To restrict rbg data back to [0,255] range
-            ScaledTanh()
+            # ScaledTanh()
+            nn.Tanh()
         )
     
     def forward(self, x):
@@ -205,11 +211,8 @@ def gram_matrix(x):
 #     def __init__(self):
 #         super(TVR, self).__init__()
     
-def tvr(x):
-    _,c,h,w = x.size()
-    tv_h = torch.pow(x[:,:,1:,:]-x[:,:,:-1,:], 2).sum()
-    tv_w = torch.pow(x[:,:,:,1:]-x[:,:,:,:-1], 2).sum()
-    return (tv_h+tv_w)/(c*h*w)
+def tvr(x):    
+    return torch.sum(torch.abs(x[:,:,:,:-1]-x[:,:,:,1:])) + torch.sum(torch.abs(x[:,:,:-1,:]-x[:,:,1:,:]))
 
 # Style Loss
 # MSE of gram matrix differences between the generated and style images
@@ -326,8 +329,8 @@ def main():
     STYLE_IMAGE = './style.jpg'
     # WEIGHTS
     FEATURE_WEIGHT = 1.0
-    STYLE_WEIGHT = 5.0
-    TVR_WEIGHT = 1.0
+    STYLE_WEIGHT = 1e4
+    TVR_WEIGHT = 1e-6
     # Learning Rate
     LR = 0.001
     
@@ -450,12 +453,11 @@ def main():
                 model.train()
                 print(msg)
                 
-            if count % 4000 == 0:
+            if count % 1000 == 0:
                 optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
                 epoch += 1
-                count = 0
                 
-            if epoch >= max_epoch:
+            if epoch >= max_epoch * 1000:
                 return
     
     return
