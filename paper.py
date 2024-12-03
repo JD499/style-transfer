@@ -100,8 +100,8 @@ class UpsampleBlock(nn.Module):
                       stride=2,
                       padding=1,
                       output_padding=1),
-            # nn.InstanceNorm2d(32, affine=True),
-            nn.BatchNorm2d(32),
+            nn.InstanceNorm2d(32, affine=True),
+            # nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.ConvTranspose2d(in_channels=32,
                       out_channels=3,
@@ -109,8 +109,8 @@ class UpsampleBlock(nn.Module):
                       stride= 2,
                       padding=4,
                       output_padding=1),
-            # nn.InstanceNorm2d(3, affine=True), 
-            nn.BatchNorm2d(3),            
+            nn.InstanceNorm2d(3, affine=True), 
+            # nn.BatchNorm2d(3),            
             # To restrict rbg data back to [0,255] range
             # ScaledTanh()
             nn.Tanh()
@@ -324,13 +324,13 @@ def main():
     # Training on COCO17 dataset
     IMAGE_SIZE = 256
     # TEMP : Set to 1 at the moment because we are testing that the network will even train
-    BATCH_SIZE = 1
+    BATCH_SIZE = 4
     # STYLE
     STYLE_IMAGE = './style.jpg'
     # WEIGHTS
-    FEATURE_WEIGHT = 1.0
-    STYLE_WEIGHT = 1e4
-    TVR_WEIGHT = 1e-6
+    FEATURE_WEIGHT = 0.5
+    STYLE_WEIGHT = 1e5
+    TVR_WEIGHT = 1e-5
     # Learning Rate
     LR = 0.001
     
@@ -350,8 +350,9 @@ def main():
     
     # Gets the coco dataset URLs. Each url needs to be grabbed and read still 
     train_data = datasets.ImageFolder('./train', transform)
+    print('loading data')
     train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=1)
-    
+    print('data loaded')
     # Setup PerceptuaLoss network
     with torch.no_grad():
         loss_network = LossNetwork()
@@ -445,7 +446,7 @@ def main():
             total_tvr_loss += tvr_loss
             
             # Debug msg
-            if count % 100 == 0:
+            if count % 1000 == 0:
                 msg = f'{time.ctime()} [{count} / {max_epoch * 4000}] feature:{total_feature_loss} style:{total_style_loss} tvr:{total_tvr_loss} total:{total_feature_loss + total_style_loss + total_tvr_loss}'
                 model.eval()
                 y = model(x)
@@ -453,14 +454,14 @@ def main():
                 model.train()
                 print(msg)
                 
-            if count % 1000 == 0:
-                optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
+            if count % 10250 == 0:
+                # optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
                 epoch += 1
                 
             if epoch >= max_epoch * 1000:
+                torch.save(model, './models')
                 return
-    
-    return
+
                 
             
 if __name__ == "__main__":
