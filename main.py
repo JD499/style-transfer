@@ -7,6 +7,7 @@ import torchvision
 from PIL import Image
 from torchvision import models, transforms
 from torchvision.models import VGG19_Weights
+import matplotlib.pyplot as plt
 
 
 # Set device as Metal, CUDA, or CPU
@@ -132,20 +133,40 @@ def compute_loss(vgg, content, style, generated, content_weight, style_weight):
     content_loss = calc_content_loss(content_content, generated_content)
     style_loss = calc_style_loss(style_features, generated_style)
 
-    # Combine losses with weights
-    total_loss = (content_weight * content_loss) + (style_weight * style_loss)
+    # Scale losses
+    weighted_content_loss = content_weight * content_loss
+    weighted_style_loss = style_weight * style_loss
 
-    return total_loss
+
+    total_loss = weighted_content_loss + weighted_style_loss
+    return total_loss, weighted_content_loss.item(), weighted_style_loss.item()
+
+def plot_losses(loss_data):
+    plt.figure(figsize=(10, 6))
+    iterations = range(len(loss_data['content']))
+    
+    plt.plot(iterations, loss_data['content'], label='Content Loss')
+    plt.plot(iterations, loss_data['style'], label='Style Loss')
+    plt.plot(iterations, loss_data['total'], label='Total Loss')
+    
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.title('Style Transfer Losses Over Time')
+    plt.legend()
+    plt.yscale('log')
+    plt.grid(True)
+    plt.savefig('loss_plot.png')
+    plt.close()
 
 
 # Style transfer
 def style_transfer(
     content_path,
     style_path,
-    iterations=300,
+    iterations=1500,
     optimizer="sgd",
-    lr=8000,
-    content_weight=1e-60,
+    lr=1000,
+    content_weight=1e-8,
     style_weight=1,
     save_interval=50,
     output_prefix="output"
@@ -176,30 +197,49 @@ def style_transfer(
     # Optimization loop
     loss_history = []
     best_loss = float('inf')
+
+    loss_data = {
+        'content': [],
+        'style': [],
+        'total': []
+    }
     
     for i in range(iterations):
         optimizer.zero_grad()
         
-        loss = compute_loss(
+        total_loss, content_loss, style_loss = compute_loss(
             vgg, content, style, generated,
             content_weight, style_weight
         )
+
+        loss_data['content'].append(content_loss)
+        loss_data['style'].append(style_loss)
+        loss_data['total'].append(total_loss.item())
         
-        loss_history.append(loss.item())
+        loss_history.append(total_loss.item())
         
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+        if total_loss.item() < best_loss:
+            best_loss = total_loss.item()
             
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
         
         if save_interval and i % save_interval == 0:
-            print(f"Iteration {i}, Loss: {loss.item()}")
+            print(f"\nIteration {i}")
+            print(f"Content Loss: {content_loss}")
+            print(f"Style Loss: {style_loss}")
+            print(f"Total Loss: {total_loss.item()}")
             save_image(generated, f"{output_prefix}_iter{i}.jpg")
+
+    
+    print("Printing loss plot")
+    plot_losses(loss_data)
 
     final_image_path = f"{output_prefix}_final.jpg"
     save_image(generated, final_image_path)
-    print(f"Final iteration {iterations}, Loss: {loss.item()}")
+    print(f"Final iteration {iterations}, Loss: {total_loss.item()}")
+    print(f"Content Loss: {content_loss}")
+    print(f"Style Loss: {style_loss}")
     print(f"Saved final image to {final_image_path}")
     
 
@@ -373,8 +413,8 @@ def style_transfer_search(
 
 if __name__ == "__main__":
     # Control flags
-    process_video = True
-    do_search = True
+    process_video = False
+    do_search = False
     frame_number = 100
 
     # Input paths
