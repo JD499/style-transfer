@@ -401,7 +401,7 @@ def main():
     total_feature_loss = 0
     total_style_loss = 0
     total_tvr_loss = 0
-
+    
     while True:
         for x, _ in train_loader:
             count += 1
@@ -458,8 +458,8 @@ def main():
                 # optimizer = torch.optim.Adam(model.parameters(), LR * 0.1)
                 epoch += 1
                 
-            if epoch >= max_epoch * 1000:
-                torch.save(model, './models')
+            if epoch >= max_epoch:
+                torch.save(model, './models/model.pt')
                 return
 
                 
