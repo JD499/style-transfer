@@ -315,6 +315,15 @@ def save_debug_image(tensor_orig, tensor_transformed, filename):
     new_im.paste(result, (result.size[0] + 5,0))
     new_im.save(filename)
 
+def save_image(tensor_orig, tensor_transformed, filename):
+    assert tensor_orig.size() == tensor_transformed.size()
+    result = Image.fromarray(recover_image(tensor_transformed.cpu().detach().numpy())[0])
+    orig = Image.fromarray(recover_image(tensor_orig.cpu().numpy())[0])
+    new_im = Image.new('RGB', (result.size[0] * 2 + 5, result.size[1]))
+    new_im.paste(orig, (0,0))
+    new_im.paste(result, (result.size[0] + 5,0))
+    new_im.save(filename)
+
 # Training the model
 def main():
     from torchvision import datasets
@@ -347,6 +356,7 @@ def main():
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225])
     ])
+
     
     # Gets the coco dataset URLs. Each url needs to be grabbed and read still 
     train_data = datasets.ImageFolder('./train', transform)
@@ -465,4 +475,20 @@ def main():
                 
             
 if __name__ == "__main__":
-    main()
+    image = Image.open('./cubism.jpg')
+    
+    transform = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+            # mean and std taken from ImageNet norm & std
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225])
+        ])
+    
+    image = transform(image)
+    model = torch.load('./models/model.pt', weights_only=False, map_location='cpu')
+    model.eval()
+    x = model(image)
+    save_image(image, x, 'cubed.jpg')
+    # main()
