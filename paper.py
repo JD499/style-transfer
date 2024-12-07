@@ -10,6 +10,7 @@ from torchvision import transforms, models
 from PIL import Image
 from torchvision import datasets
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -327,6 +328,9 @@ def convert_eac_equirectangular(frame):
 
     return frame
 
+# def train_data_capture():
+    
+
 def train(model_output,
           debug_output,
           data_source,
@@ -402,6 +406,7 @@ def train(model_output,
     print('Setting up CUDA parameters')
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if (DEVICE.type == "cuda"):
+        torch.cuda.empty_cache()
         torch.cuda.set_per_process_memory_fraction(cuda_limit)
         
     # Training parameter setup
@@ -471,6 +476,9 @@ def train(model_output,
     total_tvr_loss = 0
     total_loss = 0
     
+    # Intialize Data Capture
+    writer = SummaryWriter()
+    
     # Initiate training loop
     count = 0
     curr_epoch = 0
@@ -528,8 +536,18 @@ def train(model_output,
             
             # DEBUG INTERVAL
             if count % DEBUG_INTERVAL == 0:
-                mesg = "{} [{}] content: {:.2f}  style: {:.2f}  reg: {:.2f} total: {:.6f}".format(
-                            time.ctime(), count,
+                # Update summary writer with info
+                actual_count = count * (curr_epoch + 1)
+                writer.add_scalar('Loss/Individual/content', feature_loss, actual_count)
+                writer.add_scalar('Loss/Individual/style', style_loss, actual_count)
+                writer.add_scalar('Loss/Individual/tvr', tvr_loss, actual_count)
+                writer.add_scalar('Loss/Total/content', total_feature_loss, actual_count)
+                writer.add_scalar('Loss/Total/style', total_style_loss, actual_count)
+                writer.add_scalar('Loss/Total/tvr', total_tvr_loss, actual_count)
+                
+                # Print debug log
+                mesg = "{} [{}] LR: {} content: {:.2f}  style: {:.2f}  reg: {:.2f} total: {:.6f}".format(
+                            time.ctime(), count, LR,
                             total_feature_loss / DEBUG_INTERVAL,
                             total_style_loss / DEBUG_INTERVAL,
                             total_tvr_loss / DEBUG_INTERVAL,
@@ -556,6 +574,7 @@ def train(model_output,
         optimizer = torch.optim.Adam(model.parameters(), lr=LR)            
 
     torch.save(model, os.path.join(MODEL_OUTPUT, 'model_test.pt'))
+    writer.close()
      
 if __name__ == "__main__":
     train(
@@ -563,7 +582,7 @@ if __name__ == "__main__":
         debug_output='./debug',
         data_source='./train',
         style_source='style.jpg',
-        epochs=1,
+        epochs=2,
         content_weight=0.5,
         style_weight=1e5,
         tvr_weight=1e-5,
