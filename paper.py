@@ -60,7 +60,8 @@ class DownsampleBlock(nn.Module):
     def __init__(self):
         super(DownsampleBlock, self).__init__()
         self.downblock = nn.Sequential(
-            nn.ReflectionPad2d(2),
+            # nn.ReflectionPad2d(2),
+            nn.CircularPad2d(10),
             # Paper specifies that fraction tranposes are used 
             nn.Conv2d(in_channels=3,
                       out_channels=32,
@@ -69,7 +70,7 @@ class DownsampleBlock(nn.Module):
             nn.InstanceNorm2d(32, affine=True),
             # nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ReflectionPad2d(2),
+            # nn.ReflectionPad2d(2),
             nn.Conv2d(in_channels=32,
                       out_channels=64,
                       kernel_size=(3,3),
@@ -81,6 +82,7 @@ class DownsampleBlock(nn.Module):
         
     def forward(self, x):
         output = self.downblock(x)
+        print('output {}'.format(output.size()))
         return output
 
 # Upsampling Block
@@ -93,15 +95,15 @@ class UpsampleBlock(nn.Module):
     def __init__(self):
         super(UpsampleBlock, self).__init__()
         self.upblock = nn.Sequential(
+            nn.ReflectionPad2d(2),
             nn.ConvTranspose2d(in_channels=64,
                       out_channels=32,
                       kernel_size=(3,3),
-                      stride=2,
-                      padding=1,
-                      output_padding=1),
+                      stride=2),
             nn.InstanceNorm2d(32, affine=True),
             # nn.BatchNorm2d(32),
             nn.ReLU(),
+            nn.ReflectionPad2d(2),
             nn.ConvTranspose2d(in_channels=32,
                       out_channels=3,
                       kernel_size=(9,9),
@@ -109,15 +111,13 @@ class UpsampleBlock(nn.Module):
                       padding=4,
                       output_padding=1),
             nn.InstanceNorm2d(3, affine=True), 
-            # nn.BatchNorm2d(3),            
-            # To restrict rbg data back to [0,255] range
-            # ScaledTanh()
             nn.Tanh()
         )
     
     def forward(self, x):
         output = self.upblock(x)
-        return output
+        print('upsamp {}'.format(output[:,:,:256,:256].size()))
+        return output[:,:,:256,:256]
 
 # Residual block
 # temp = stored input imag
