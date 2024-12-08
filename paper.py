@@ -61,7 +61,6 @@ class DownsampleBlock(nn.Module):
         super(DownsampleBlock, self).__init__()
         self.downblock = nn.Sequential(
             # nn.ReflectionPad2d(2),
-            nn.CircularPad2d(10),
             # Paper specifies that fraction tranposes are used 
             nn.Conv2d(in_channels=3,
                       out_channels=32,
@@ -116,8 +115,8 @@ class UpsampleBlock(nn.Module):
     
     def forward(self, x):
         output = self.upblock(x)
-        print('upsamp {}'.format(output[:,:,:256,:256].size()))
-        return output[:,:,:256,:256]
+        print('upsamp {}'.format(output[:,:,:296,:296].size()))
+        return output[:,:,:296,:296]
 
 # Residual block
 # temp = stored input imag
@@ -420,6 +419,7 @@ def train(model_output,
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.CenterCrop(IMAGE_SIZE),
         transforms.ToTensor(),
+        nn.CircularPad2d(20),
         transforms.Normalize(
         # mean and std taken from ImageNet norm & std
         mean=[0.485, 0.456, 0.406],
@@ -504,10 +504,14 @@ def train(model_output,
             y_loss = loss_network(y)
             x_loss = loss_network(x_feature)
             
+            print(y.size())
+            print(x_feature.size())
             with torch.no_grad():
                 # Grabbing loss for content
                 x_feature_loss = x_loss[5].detach()
-                
+          
+            print(y_loss[5].size())
+            print(x_feature_loss.size())
             feature_loss = CONTENT_WEIGHT * mse(y_loss[5], x_feature_loss)
 
             for i in range(0,4):
