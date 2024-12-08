@@ -328,8 +328,8 @@ def convert_eac_equirectangular(frame):
 
     return frame
 
-# def train_data_capture():
-    
+def frobenius_norm(pred, target):
+    return torch.linalg.matrix_norm(pred - target, ord='fro').pow(2).mean()
 
 def train(model_output,
           debug_output,
@@ -513,7 +513,7 @@ def train(model_output,
             for i in range(0,4):
                 print(y_loss[i].size())
                 y_gram = gram_matrix(y_loss[i])
-                style_loss += mse(y_gram, style_gram[i].expand_as(y_gram))
+                style_loss += frobenius_norm(y_gram, style_gram[i].expand_as(y_gram))
             style_loss = STYLE_WEIGHT * style_loss
             
             tvr_loss = TVR_WEIGHT * tvr(y)
